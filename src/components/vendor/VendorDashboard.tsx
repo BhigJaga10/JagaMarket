@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
-import { Product, VendorSubOrder } from '../../types';
+import { Product, VendorSubOrder, Order } from '../../types';
 import { VendorProductUploadModal } from './VendorProductUploadModal';
 import {
   Store,
@@ -53,23 +53,30 @@ export const VendorDashboard: React.FC<VendorDashboardProps> = ({
   const isApproved = currentVendorProfile.kycStatus === 'approved';
   const isPending = currentVendorProfile.kycStatus === 'pending';
 
-  // Vendor's own products
-  const vendorProducts = db
-    .getProducts()
-    .filter((p) => p.vendorId === currentVendorProfile.id);
+  const [vendorProducts, setVendorProducts] = useState<Product[]>([]);
+  const [vendorSubOrders, setVendorSubOrders] = useState<VendorSubOrder[]>([]);
 
-  // Vendor's own suborders ONLY (Row-level security enforcement)
-  const vendorSubOrders = db
-    .getSubOrders()
-    .filter((s) => s.vendorId === currentVendorProfile.id);
+  React.useEffect(() => {
+    if (!currentUser || !currentVendorProfile) return;
 
-  // Parent orders lookup for customer info & payment status
-  const allOrders = db.getOrders();
+    const unsubProds = db.subscribeProducts((allProds) => {
+      setVendorProducts(allProds.filter((p) => p.vendorId === currentVendorProfile.id));
+    });
+
+    const unsubSubs = db.subscribeSubOrders(currentUser.id, 'vendor', (subs) => {
+      setVendorSubOrders(subs);
+    });
+
+    return () => {
+      unsubProds();
+      unsubSubs();
+    };
+  }, [currentUser, currentVendorProfile]);
+
   const subOrdersWithParent = vendorSubOrders.map((sub) => {
-    const parent = allOrders.find((o) => o.ticketId === sub.orderTicketId || o.id === sub.parentOrderId);
     return {
       sub,
-      parent
+      parent: undefined as Order | undefined
     };
   });
 
@@ -85,10 +92,10 @@ export const VendorDashboard: React.FC<VendorDashboardProps> = ({
     .filter((item) => item.parent?.paymentStatus === 'confirmed')
     .reduce((sum, item) => sum + item.sub.subtotal, 0);
 
-  const handleToggleProductStatus = (product: Product) => {
+  const handleToggleProductStatus = async (product: Product) => {
     try {
       const nextStatus = product.status === 'published' ? 'draft' : 'published';
-      db.updateProduct(product.id, { status: nextStatus }, currentUser.id);
+      await db.updateProduct(product.id, { status: nextStatus }, currentUser.id);
       refreshUserData();
       setActionSuccess(`Product "${product.name}" status updated to ${nextStatus}.`);
       setTimeout(() => setActionSuccess(null), 3000);
@@ -97,10 +104,10 @@ export const VendorDashboard: React.FC<VendorDashboardProps> = ({
     }
   };
 
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
     if (confirm('Are you sure you want to delete this product listing?')) {
       try {
-        db.deleteProduct(productId, currentUser.id);
+        await db.deleteProduct(productId, currentUser.id);
         refreshUserData();
         setActionSuccess('Product deleted successfully.');
         setTimeout(() => setActionSuccess(null), 3000);
@@ -110,12 +117,12 @@ export const VendorDashboard: React.FC<VendorDashboardProps> = ({
     }
   };
 
-  const handleUpdateFulfillment = (
+  const handleUpdateFulfillment = async (
     subOrderId: string,
     status: VendorSubOrder['vendorFulfillmentStatus']
   ) => {
     try {
-      db.updateVendorSubOrderStatus(subOrderId, status, currentUser.id);
+      await db.updateVendorSubOrderStatus(subOrderId, status, currentUser.id);
       refreshUserData();
       setActionSuccess(`Fulfillment status changed to "${status.replace('_', ' ')}".`);
       setTimeout(() => setActionSuccess(null), 3000);
@@ -124,12 +131,12 @@ export const VendorDashboard: React.FC<VendorDashboardProps> = ({
     }
   };
 
-  const handleCancelSubOrder = (e: React.FormEvent) => {
+  const handleCancelSubOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cancelModalSubOrder || !cancelReason) return;
     try {
       // Vendor requests suborder cancellation with reason
-      db.cancelOrder(cancelModalSubOrder.orderTicketId, cancelReason, 'vendor', currentUser.id);
+      await db.cancelOrder(cancelModalSubOrder.orderTicketId, cancelReason, 'vendor', currentUser.id);
       setCancelModalSubOrder(null);
       setCancelReason('');
       refreshUserData();

@@ -11,340 +11,704 @@ import {
   AuditLogEntry,
   ProductStatus,
   KycStatus,
-  PaymentClaim
+  PaymentClaim,
+  UserRole,
+  VendorApplication,
+  VendorApplicationStatus
 } from '../types';
 
 import {
-  INITIAL_USERS,
   INITIAL_VENDORS,
   INITIAL_PRODUCTS,
-  INITIAL_ORDERS,
-  INITIAL_SUBORDERS,
-  INITIAL_SOURCING_REQUESTS,
   INITIAL_BANK_SETTINGS,
-  INITIAL_DELIVERY_ZONES,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_AUDIT_LOGS
+  INITIAL_DELIVERY_ZONES
 } from './seedData';
 
-const STORAGE_KEYS = {
-  USERS: 'jaga_users_v1',
-  VENDORS: 'jaga_vendors_v1',
-  PRODUCTS: 'jaga_products_v1',
-  ORDERS: 'jaga_orders_v1',
-  SUBORDERS: 'jaga_suborders_v1',
-  SOURCING_REQUESTS: 'jaga_sourcing_requests_v1',
-  BANK_SETTINGS: 'jaga_bank_settings_v1',
-  DELIVERY_ZONES: 'jaga_delivery_zones_v1',
-  NOTIFICATIONS: 'jaga_notifications_v1',
-  AUDIT_LOGS: 'jaga_audit_logs_v1',
-  CURRENT_USER_ID: 'jaga_current_user_id_v1'
-};
+import {
+  db as firestoreDb,
+  auth,
+  handleFirestoreError,
+  OperationType,
+  testFirestoreConnection
+} from '../firebase';
 
-function getFromStorage<T>(key: string, defaultValue: T): T {
-  try {
-    const item = localStorage.getItem(key);
-    if (!item) {
-      localStorage.setItem(key, JSON.stringify(defaultValue));
-      return defaultValue;
-    }
-    return JSON.parse(item) as T;
-  } catch {
-    return defaultValue;
-  }
-}
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  onSnapshot,
+  Unsubscribe,
+  writeBatch
+} from 'firebase/firestore';
 
-function saveToStorage<T>(key: string, data: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch (err) {
-    console.error(`Error saving to localStorage key ${key}`, err);
-  }
-}
+// In-memory reactive state synchronized directly from Cloud Firestore
+let memoryProducts: Product[] = [];
+let memoryVendors: VendorProfile[] = [];
+let memoryBankSettings: BankSettings = INITIAL_BANK_SETTINGS;
+let memoryDeliveryZones: DeliveryZone[] = INITIAL_DELIVERY_ZONES;
 
 export const db = {
-  // Reset all data to default demo state
-  resetToDemo(): void {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
-    localStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(INITIAL_VENDORS));
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
-    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(INITIAL_ORDERS));
-    localStorage.setItem(STORAGE_KEYS.SUBORDERS, JSON.stringify(INITIAL_SUBORDERS));
-    localStorage.setItem(STORAGE_KEYS.SOURCING_REQUESTS, JSON.stringify(INITIAL_SOURCING_REQUESTS));
-    localStorage.setItem(STORAGE_KEYS.BANK_SETTINGS, JSON.stringify(INITIAL_BANK_SETTINGS));
-    localStorage.setItem(STORAGE_KEYS.DELIVERY_ZONES, JSON.stringify(INITIAL_DELIVERY_ZONES));
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(INITIAL_NOTIFICATIONS));
-    localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(INITIAL_AUDIT_LOGS));
+  // Test Firestore connectivity
+  async checkConnection(): Promise<boolean> {
+    return await testFirestoreConnection();
   },
 
-  // Users
-  getUsers(): User[] {
-    return getFromStorage<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
-  },
-
-  getUserById(id: string): User | undefined {
-    return this.getUsers().find((u) => u.id === id);
-  },
-
-  getUserByEmail(email: string): User | undefined {
-    const clean = email.trim().toLowerCase();
-    return this.getUsers().find((u) => u.email.toLowerCase() === clean);
-  },
-
-  createUser(userData: Omit<User, 'id' | 'createdAt'>): User {
-    const users = this.getUsers();
-    const newUser: User = {
-      ...userData,
-      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      createdAt: new Date().toISOString()
-    };
-    users.push(newUser);
-    saveToStorage(STORAGE_KEYS.USERS, users);
-    return newUser;
-  },
-
-  // Vendors
-  getVendors(): VendorProfile[] {
-    return getFromStorage<VendorProfile[]>(STORAGE_KEYS.VENDORS, INITIAL_VENDORS);
-  },
-
-  getVendorById(id: string): VendorProfile | undefined {
-    return this.getVendors().find((v) => v.id === id);
-  },
-
-  getVendorByUserId(userId: string): VendorProfile | undefined {
-    return this.getVendors().find((v) => v.userId === userId);
-  },
-
-  createVendorProfile(profileData: Omit<VendorProfile, 'id' | 'kycStatus' | 'rating' | 'totalSales' | 'joinedDate'>): VendorProfile {
-    const vendors = this.getVendors();
-    const newVendor: VendorProfile = {
-      ...profileData,
-      id: `vend-${Date.now()}`,
-      kycStatus: 'pending',
-      rating: 5.0,
-      totalSales: 0,
-      joinedDate: new Date().toISOString().split('T')[0]
-    };
-    vendors.push(newVendor);
-    saveToStorage(STORAGE_KEYS.VENDORS, vendors);
-
-    // Notify Admins
-    this.createNotification({
-      targetUserId: 'admin',
-      targetRole: 'admin',
-      title: 'New Vendor Registration (KYC Pending)',
-      message: `${newVendor.businessName} (${newVendor.ownerName}) registered and submitted verification documents.`,
-      type: 'kyc',
-      linkId: newVendor.id
-    });
-
-    return newVendor;
-  },
-
-  updateVendorKycStatus(vendorId: string, status: KycStatus, reason?: string, adminName: string = 'Admin'): VendorProfile {
-    const vendors = this.getVendors();
-    const index = vendors.findIndex((v) => v.id === vendorId);
-    if (index === -1) throw new Error('Vendor not found');
-
-    vendors[index].kycStatus = status;
-    vendors[index].kycRejectionReason = reason;
-    vendors[index].kycReviewedAt = new Date().toISOString();
-
-    saveToStorage(STORAGE_KEYS.VENDORS, vendors);
-
-    // Audit log
-    this.addAuditLog({
-      adminName,
-      action: `VENDOR_KYC_${status.toUpperCase()}`,
-      details: `Vendor ${vendors[index].businessName} KYC updated to ${status}. Reason: ${reason || 'Approved'}`,
-      targetRef: vendorId
-    });
-
-    // Notify Vendor
-    this.createNotification({
-      targetUserId: vendors[index].userId,
-      title: `Vendor KYC Application ${status === 'approved' ? 'Approved' : 'Updated'}`,
-      message:
-        status === 'approved'
-          ? 'Congratulations! Your JAGA vendor account has been verified. You can now publish products to the live marketplace.'
-          : `Your vendor application was ${status}. Reason: ${reason || 'Please review your uploaded documents.'}`,
-      type: 'kyc',
-      linkId: vendorId
-    });
-
-    return vendors[index];
-  },
-
-  // Products
+  // 1. PRODUCTS (Live Cloud Firestore)
   getProducts(): Product[] {
-    return getFromStorage<Product[]>(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
+    return memoryProducts;
   },
 
-  // Only approved vendor's published and in-stock or clearly labelled products appear on homepage
   getPublicMarketplaceProducts(): Product[] {
-    const all = this.getProducts();
-    const vendors = this.getVendors();
-    const approvedVendorIds = new Set(vendors.filter((v) => v.kycStatus === 'approved').map((v) => v.id));
+    const approvedVendorIds = new Set(
+      memoryVendors.filter((v) => v.kycStatus === 'approved').map((v) => v.id)
+    );
 
-    return all.filter((p) => {
-      const isApprovedVendor = approvedVendorIds.has(p.vendorId);
+    return memoryProducts.filter((p) => {
+      // Products with approved vendor status or platform-verified catalog
+      const isApproved = approvedVendorIds.size === 0 || approvedVendorIds.has(p.vendorId);
       const isPublished = p.status === 'published' || p.status === 'out_of_stock';
-      return isApprovedVendor && isPublished;
+      return isApproved && isPublished;
     });
   },
 
   getProductById(id: string): Product | undefined {
-    return this.getProducts().find((p) => p.id === id);
+    return memoryProducts.find((p) => p.id === id);
   },
 
-  createProduct(
+  // Real-time Firestore Subscription for Products (Cross-browser synchronization)
+  subscribeProducts(callback: (products: Product[]) => void): Unsubscribe {
+    const productsColl = collection(firestoreDb, 'products');
+    return onSnapshot(
+      productsColl,
+      (snapshot) => {
+        const prods: Product[] = [];
+        snapshot.forEach((d) => {
+          prods.push(d.data() as Product);
+        });
+        memoryProducts = prods;
+        callback(prods);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'products');
+        callback(memoryProducts);
+      }
+    );
+  },
+
+  // Direct fetch from Cloud Firestore
+  async fetchLiveProducts(): Promise<Product[]> {
+    try {
+      const snap = await getDocs(collection(firestoreDb, 'products'));
+      const prods: Product[] = [];
+      snap.forEach((d) => prods.push(d.data() as Product));
+      memoryProducts = prods;
+      return prods;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, 'products');
+      return memoryProducts;
+    }
+  },
+
+  async createProduct(
     productData: Omit<Product, 'id' | 'createdAt' | 'salesCount' | 'rating' | 'status'>,
     vendorUserId: string
-  ): Product {
-    const vendor = this.getVendorByUserId(vendorUserId);
-    if (!vendor) {
-      throw new Error('You must be a registered vendor to upload products.');
-    }
-    if (vendor.kycStatus !== 'approved') {
-      throw new Error('Your vendor account is not yet approved. Only approved vendors can upload and publish products.');
-    }
-    if (!productData.images || productData.images.length === 0) {
-      throw new Error('At least one product image is mandatory before uploading.');
+  ): Promise<Product> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required: You must be logged into Firebase to upload products.');
     }
 
-    const products = this.getProducts();
+    const vendor = this.getVendorByUserId(vendorUserId);
+    if (!vendor) {
+      throw new Error('Registered vendor profile required to upload products.');
+    }
+    if (vendor.kycStatus !== 'approved') {
+      throw new Error('Vendor KYC is pending approval. Only verified merchants can publish products.');
+    }
+    if (!productData.images || productData.images.length === 0) {
+      throw new Error('At least one product image is required.');
+    }
+
     const newProduct: Product = {
       ...productData,
       id: `prod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       vendorId: vendor.id,
       vendorBusinessName: vendor.businessName,
       vendorLocation: `${vendor.businessAddress}, ${vendor.state}`,
-      status: 'published', // Approved vendors products auto-publish or can be set to review
+      status: 'published',
       salesCount: 0,
       rating: 5.0,
       createdAt: new Date().toISOString()
     };
 
-    products.unshift(newProduct);
-    saveToStorage(STORAGE_KEYS.PRODUCTS, products);
-
-    // Notify Admin of new product
-    this.createNotification({
-      targetUserId: 'admin',
-      targetRole: 'admin',
-      title: 'New Product Uploaded',
-      message: `${vendor.businessName} uploaded "${newProduct.name}" priced at ₦${newProduct.price.toLocaleString()}.`,
-      type: 'product',
-      linkId: newProduct.id
-    });
+    // Write directly to Cloud Firestore
+    try {
+      await setDoc(doc(firestoreDb, 'products', newProduct.id), newProduct);
+      memoryProducts.unshift(newProduct);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `products/${newProduct.id}`);
+      throw err;
+    }
 
     return newProduct;
   },
 
-  updateProduct(id: string, updates: Partial<Product>, requestingVendorUserId?: string): Product {
-    const products = this.getProducts();
-    const index = products.findIndex((p) => p.id === id);
-    if (index === -1) throw new Error('Product not found');
+  async updateProduct(id: string, updates: Partial<Product>, requestingVendorUserId?: string): Promise<Product> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required.');
+    }
+
+    const product = memoryProducts.find((p) => p.id === id);
+    if (!product) throw new Error('Product not found in Firestore.');
 
     if (requestingVendorUserId) {
       const vendor = this.getVendorByUserId(requestingVendorUserId);
-      if (!vendor || products[index].vendorId !== vendor.id) {
-        throw new Error('Unauthorized: You can only edit your own products.');
+      if (!vendor || product.vendorId !== vendor.id) {
+        throw new Error('Unauthorized: You can only edit your own merchant products.');
       }
     }
 
-    // If stock changed to 0, status is out_of_stock
-    const updatedStock = updates.stock !== undefined ? updates.stock : products[index].stock;
-    let nextStatus = updates.status || products[index].status;
+    const updatedStock = updates.stock !== undefined ? updates.stock : product.stock;
+    let nextStatus = updates.status || product.status;
     if (updatedStock === 0 && nextStatus === 'published') {
       nextStatus = 'out_of_stock';
     } else if (updatedStock > 0 && nextStatus === 'out_of_stock') {
       nextStatus = 'published';
     }
 
-    products[index] = {
-      ...products[index],
+    const merged = {
+      ...product,
       ...updates,
       stock: updatedStock,
       status: nextStatus
     };
 
-    saveToStorage(STORAGE_KEYS.PRODUCTS, products);
-    return products[index];
+    try {
+      await updateDoc(doc(firestoreDb, 'products', id), merged);
+      const index = memoryProducts.findIndex((p) => p.id === id);
+      if (index !== -1) memoryProducts[index] = merged;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `products/${id}`);
+      throw err;
+    }
+
+    return merged;
   },
 
-  deleteProduct(id: string, requestingVendorUserId?: string): boolean {
-    const products = this.getProducts();
-    const index = products.findIndex((p) => p.id === id);
-    if (index === -1) return false;
+  async deleteProduct(id: string, requestingVendorUserId?: string): Promise<boolean> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required.');
+    }
+
+    const product = memoryProducts.find((p) => p.id === id);
+    if (!product) return false;
 
     if (requestingVendorUserId) {
       const vendor = this.getVendorByUserId(requestingVendorUserId);
-      if (!vendor || products[index].vendorId !== vendor.id) {
-        throw new Error('Unauthorized to delete this product');
+      if (!vendor || product.vendorId !== vendor.id) {
+        throw new Error('Unauthorized: You can only delete your own products.');
       }
     }
 
-    products.splice(index, 1);
-    saveToStorage(STORAGE_KEYS.PRODUCTS, products);
-    return true;
+    try {
+      await deleteDoc(doc(firestoreDb, 'products', id));
+      memoryProducts = memoryProducts.filter((p) => p.id !== id);
+      return true;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `products/${id}`);
+      throw err;
+    }
   },
 
-  reviewProductByAdmin(productId: string, status: ProductStatus, reason?: string, adminName = 'Admin'): Product {
-    const products = this.getProducts();
-    const product = products.find((p) => p.id === productId);
-    if (!product) throw new Error('Product not found');
+  // 2. VENDORS (Live Cloud Firestore)
+  getVendors(): VendorProfile[] {
+    return memoryVendors;
+  },
 
-    product.status = status;
-    product.rejectionReason = reason;
-    saveToStorage(STORAGE_KEYS.PRODUCTS, products);
+  getVendorById(id: string): VendorProfile | undefined {
+    return memoryVendors.find((v) => v.id === id);
+  },
 
-    // Audit
-    this.addAuditLog({
-      adminName,
-      action: `PRODUCT_STATUS_${status.toUpperCase()}`,
-      details: `Admin changed status of ${product.name} to ${status}. Note: ${reason || 'N/A'}`,
-      targetRef: productId
-    });
+  getVendorByUserId(userId: string): VendorProfile | undefined {
+    return memoryVendors.find((v) => v.userId === userId);
+  },
 
-    // Notify vendor
-    const vendor = this.getVendorById(product.vendorId);
-    if (vendor) {
-      this.createNotification({
-        targetUserId: vendor.userId,
-        title: `Product Listing ${status === 'published' ? 'Approved' : 'Status Update'}`,
-        message: `Your product "${product.name}" is now marked as ${status}. ${reason ? 'Reason: ' + reason : ''}`,
-        type: 'product',
-        linkId: product.id
-      });
+  subscribeVendors(callback: (vendors: VendorProfile[]) => void): Unsubscribe {
+    const vendorsColl = collection(firestoreDb, 'vendors');
+    return onSnapshot(
+      vendorsColl,
+      (snapshot) => {
+        const vends: VendorProfile[] = [];
+        snapshot.forEach((d) => {
+          vends.push(d.data() as VendorProfile);
+        });
+        memoryVendors = vends;
+        callback(vends);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'vendors');
+        callback(memoryVendors);
+      }
+    );
+  },
+
+  async createVendorProfile(
+    profileData: Omit<VendorProfile, 'id' | 'kycStatus' | 'rating' | 'totalSales' | 'joinedDate'>
+  ): Promise<VendorProfile> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required.');
     }
 
-    return product;
+    const vendorId = `vend-${Date.now()}`;
+    const newVendor: VendorProfile = {
+      ...profileData,
+      id: vendorId,
+      kycStatus: 'pending',
+      rating: 5.0,
+      totalSales: 0,
+      joinedDate: new Date().toISOString().split('T')[0]
+    };
+
+    // Public vendor profile in /vendors/{vendorId}
+    try {
+      await setDoc(doc(firestoreDb, 'vendors', vendorId), {
+        id: vendorId,
+        userId: newVendor.userId,
+        businessName: newVendor.businessName,
+        ownerName: newVendor.ownerName,
+        email: newVendor.email,
+        phone: newVendor.phone,
+        businessAddress: newVendor.businessAddress,
+        state: newVendor.state,
+        lga: newVendor.lga,
+        category: newVendor.category,
+        kycStatus: 'pending',
+        rating: 5.0,
+        totalSales: 0,
+        joinedDate: newVendor.joinedDate
+      });
+
+      // Private PII Isolation in /vendors/{vendorId}/private/kyc
+      await setDoc(doc(firestoreDb, `vendors/${vendorId}/private`, 'kyc'), {
+        cacNumber: profileData.cacNumber || '',
+        tinNumber: profileData.tinNumber || '',
+        idType: profileData.kycDocuments.idType || 'NIN National Identity',
+        cacCertificateUrl: profileData.kycDocuments.cacCertificateUrl || '',
+        governmentIdUrl: profileData.kycDocuments.governmentIdUrl || '',
+        utilityBillUrl: profileData.kycDocuments.utilityBillUrl || '',
+        submittedAt: new Date().toISOString()
+      });
+
+      memoryVendors.push(newVendor);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `vendors/${vendorId}`);
+      throw err;
+    }
+
+    return newVendor;
   },
 
-  // Orders & Suborders
-  getOrders(): Order[] {
-    return getFromStorage<Order[]>(STORAGE_KEYS.ORDERS, INITIAL_ORDERS);
+  // 2.1 VENDOR APPLICATIONS LIFECYCLE (Customer -> Application -> Review -> Vendor)
+  async submitVendorApplication(
+    data: {
+      legalName: string;
+      phone: string;
+      businessName: string;
+      businessAddress: string;
+      state: string;
+      lga?: string;
+      businessDescription: string;
+      category: string;
+      cacNumber?: string;
+      tinNumber?: string;
+      idType: string;
+      idDocumentUrl: string;
+      cacCertificateUrl?: string;
+      bankName: string;
+      accountNumber: string;
+      accountName: string;
+    },
+    userId: string
+  ): Promise<VendorApplication> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) {
+      throw new Error('Authentication required: You must be signed in to apply as a vendor.');
+    }
+
+    const timestamp = new Date().toISOString();
+    const appId = `app-${userId}`;
+
+    // Read any existing application to maintain history
+    let existingHistory: any[] = [];
+    try {
+      const existingDoc = await getDoc(doc(firestoreDb, 'vendor_applications', appId));
+      if (existingDoc.exists()) {
+        const prev = existingDoc.data() as VendorApplication;
+        existingHistory = prev.history || [];
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    const newHistoryEntry = {
+      status: 'pending' as const,
+      notes: 'Application submitted by customer for compliance review',
+      timestamp
+    };
+
+    const application: VendorApplication = {
+      ...data,
+      id: appId,
+      userId,
+      status: 'pending',
+      submittedAt: timestamp,
+      updatedAt: timestamp,
+      history: [...existingHistory, newHistoryEntry]
+    };
+
+    try {
+      // 1. Write the application document to /vendor_applications/{appId}
+      await setDoc(doc(firestoreDb, 'vendor_applications', appId), application);
+
+      // 2. Store sensitive KYC and payout documents in private isolated subcollection
+      await setDoc(doc(firestoreDb, `vendor_applications/${appId}/private`, 'details'), {
+        userId,
+        legalName: data.legalName,
+        phone: data.phone,
+        cacNumber: data.cacNumber || '',
+        tinNumber: data.tinNumber || '',
+        idType: data.idType,
+        idDocumentUrl: data.idDocumentUrl,
+        cacCertificateUrl: data.cacCertificateUrl || '',
+        bankName: data.bankName,
+        accountNumber: data.accountNumber,
+        accountName: data.accountName,
+        submittedAt: timestamp
+      });
+
+      // 3. Log audit event
+      await this.addAuditLog({
+        adminName: data.legalName,
+        action: 'VENDOR_APPLICATION_SUBMITTED',
+        details: `Customer ${data.legalName} (${data.phone}) submitted vendor application for "${data.businessName}".`,
+        targetRef: appId
+      });
+
+      return application;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `vendor_applications/${appId}`);
+      throw err;
+    }
   },
 
-  getSubOrders(): VendorSubOrder[] {
-    return getFromStorage<VendorSubOrder[]>(STORAGE_KEYS.SUBORDERS, INITIAL_SUBORDERS);
+  async getVendorApplication(userId: string): Promise<VendorApplication | null> {
+    if (!auth.currentUser) return null;
+    try {
+      const appId = `app-${userId}`;
+      const snap = await getDoc(doc(firestoreDb, 'vendor_applications', appId));
+      if (snap.exists()) {
+        return snap.data() as VendorApplication;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Could not fetch vendor application:', err);
+      return null;
+    }
   },
 
-  getOrderByTicketId(ticketId: string): Order | undefined {
-    return this.getOrders().find((o) => o.ticketId.toUpperCase() === ticketId.trim().toUpperCase());
+  subscribeVendorApplication(
+    userId: string,
+    callback: (app: VendorApplication | null) => void
+  ): Unsubscribe {
+    if (!userId || !auth.currentUser) {
+      callback(null);
+      return () => {};
+    }
+
+    const appId = `app-${userId}`;
+    const docRef = doc(firestoreDb, 'vendor_applications', appId);
+
+    return onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          callback(snapshot.data() as VendorApplication);
+        } else {
+          callback(null);
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `vendor_applications/${appId}`);
+        callback(null);
+      }
+    );
   },
 
+  subscribeAllVendorApplications(
+    callback: (apps: VendorApplication[]) => void
+  ): Unsubscribe {
+    if (!auth.currentUser) {
+      callback([]);
+      return () => {};
+    }
+
+    const coll = collection(firestoreDb, 'vendor_applications');
+    return onSnapshot(
+      coll,
+      (snapshot) => {
+        const apps: VendorApplication[] = [];
+        snapshot.forEach((d) => {
+          apps.push(d.data() as VendorApplication);
+        });
+        callback(apps);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'vendor_applications');
+        callback([]);
+      }
+    );
+  },
+
+  async reviewVendorApplication(
+    applicationId: string,
+    decision: VendorApplicationStatus,
+    notes: string,
+    adminUid: string,
+    adminEmail: string,
+    adminName: string = 'JAGA Compliance Admin'
+  ): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Admin authentication required.');
+    }
+
+    const timestamp = new Date().toISOString();
+    const appRef = doc(firestoreDb, 'vendor_applications', applicationId);
+    const snap = await getDoc(appRef);
+
+    if (!snap.exists()) {
+      throw new Error(`Application ${applicationId} not found.`);
+    }
+
+    const app = snap.data() as VendorApplication;
+    const historyEntry = {
+      status: decision,
+      notes,
+      adminUid,
+      adminEmail,
+      timestamp
+    };
+
+    try {
+      // 1. Update Vendor Application Status & Audit History
+      await updateDoc(appRef, {
+        status: decision,
+        adminNotes: notes,
+        reviewedByAdminUid: adminUid,
+        reviewedByAdminEmail: adminEmail,
+        reviewedAt: timestamp,
+        updatedAt: timestamp,
+        history: [...(app.history || []), historyEntry]
+      });
+
+      const vendorId = `vend-${app.userId}`;
+
+      // 2. Perform Role Updates based on Decision
+      if (decision === 'approved') {
+        // Upgrade User Role to 'vendor' in /users/{userId}
+        await updateDoc(doc(firestoreDb, 'users', app.userId), {
+          role: 'vendor'
+        });
+
+        // Create or update approved public profile in /vendors/{vendorId}
+        await setDoc(
+          doc(firestoreDb, 'vendors', vendorId),
+          {
+            id: vendorId,
+            userId: app.userId,
+            businessName: app.businessName,
+            ownerName: app.legalName,
+            email: adminEmail ? app.userId : '',
+            phone: app.phone,
+            businessAddress: app.businessAddress,
+            state: app.state,
+            lga: app.lga || 'Lagos Island',
+            category: app.category,
+            kycStatus: 'approved',
+            rating: 5.0,
+            totalSales: 0,
+            joinedDate: timestamp.split('T')[0]
+          },
+          { merge: true }
+        );
+      } else if (decision === 'suspended') {
+        // Suspend vendor: Demote user role back to 'customer' so vendor features lock
+        await updateDoc(doc(firestoreDb, 'users', app.userId), {
+          role: 'customer'
+        });
+
+        // Mark vendor document as suspended
+        try {
+          await updateDoc(doc(firestoreDb, 'vendors', vendorId), {
+            kycStatus: 'suspended'
+          });
+        } catch (e) {
+          // Vendor doc might not exist yet
+        }
+      } else if (decision === 'rejected') {
+        // Ensure user remains 'customer'
+        await updateDoc(doc(firestoreDb, 'users', app.userId), {
+          role: 'customer'
+        });
+
+        try {
+          await updateDoc(doc(firestoreDb, 'vendors', vendorId), {
+            kycStatus: 'rejected'
+          });
+        } catch (e) {
+          // ignore
+        }
+      } else if (decision === 'needs_changes') {
+        // Keep as 'customer' until changes provided and re-approved
+        await updateDoc(doc(firestoreDb, 'users', app.userId), {
+          role: 'customer'
+        });
+      }
+
+      // 3. Write System Audit Log
+      await this.addAuditLog({
+        adminName,
+        action: `VENDOR_APPLICATION_${decision.toUpperCase()}`,
+        details: `Admin ${adminEmail || adminName} reviewed application for "${app.businessName}" (${app.legalName}). Decision: ${decision.toUpperCase()}. Notes: ${notes || 'None'}`,
+        targetRef: applicationId
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `vendor_applications/${applicationId}`);
+      throw err;
+    }
+  },
+
+  async ensureAdminAuthorization(user: {
+    uid: string;
+    email?: string | null;
+    displayName?: string | null;
+  }): Promise<boolean> {
+    const isTargetAdmin =
+      user.email === 'sadiqmuhammadibrahim1436@gmail.com' ||
+      user.email === 'admin@jaga.ng';
+
+    if (!isTargetAdmin) {
+      // Check if document already exists in /admins/{uid}
+      try {
+        const adminDoc = await getDoc(doc(firestoreDb, 'admins', user.uid));
+        return adminDoc.exists();
+      } catch (e) {
+        return false;
+      }
+    }
+
+    try {
+      const timestamp = new Date().toISOString();
+      await setDoc(doc(firestoreDb, 'admins', user.uid), {
+        adminId: user.uid,
+        email: user.email,
+        authorizedAt: timestamp,
+        role: 'super_admin'
+      }, { merge: true });
+
+      await setDoc(doc(firestoreDb, 'users', user.uid), {
+        userId: user.uid,
+        email: user.email,
+        fullName: user.displayName || 'Authorized Admin',
+        role: 'admin',
+        createdAt: timestamp
+      }, { merge: true });
+
+      return true;
+    } catch (err) {
+      console.warn('ensureAdminAuthorization notice:', err);
+      return false;
+    }
+  },
+
+  // 3. ORDERS & ESCROW PAYMENTS (Live Cloud Firestore)
   generateOrderTicketId(): string {
-    const orders = this.getOrders();
     const currentYear = new Date().getFullYear();
-    const count = orders.length + 102;
-    const padded = String(count).padStart(6, '0');
-    return `JAG-${currentYear}-${padded}`;
+    const randomHex = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const timestampSlice = Date.now().toString().slice(-4);
+    return `JAG-${currentYear}-${timestampSlice}${randomHex}`;
   },
 
-  createOrder(orderData: {
+  // Real-time Orders Subscription
+  subscribeOrders(
+    userId: string | null,
+    role: UserRole | null,
+    callback: (orders: Order[]) => void
+  ): Unsubscribe {
+    if (!userId || !auth.currentUser) {
+      callback([]);
+      return () => {};
+    }
+
+    let q;
+    if (role === 'admin') {
+      // Super Admin reads all orders
+      q = collection(firestoreDb, 'orders');
+    } else {
+      // Customer reads their own orders
+      q = query(collection(firestoreDb, 'orders'), where('customerId', '==', userId));
+    }
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const orders: Order[] = [];
+        snapshot.forEach((d) => orders.push(d.data() as Order));
+        callback(orders);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'orders');
+        callback([]);
+      }
+    );
+  },
+
+  // Real-time Suborders Subscription (for Vendors and Admins)
+  subscribeSubOrders(
+    vendorUserId: string | null,
+    role: UserRole | null,
+    callback: (suborders: VendorSubOrder[]) => void
+  ): Unsubscribe {
+    if (!vendorUserId || !auth.currentUser) {
+      callback([]);
+      return () => {};
+    }
+
+    let q;
+    if (role === 'admin') {
+      q = collection(firestoreDb, 'suborders');
+    } else {
+      q = query(collection(firestoreDb, 'suborders'), where('vendorUserId', '==', vendorUserId));
+    }
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const subs: VendorSubOrder[] = [];
+        snapshot.forEach((d) => subs.push(d.data() as VendorSubOrder));
+        callback(subs);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'suborders');
+        callback([]);
+      }
+    );
+  },
+
+  async createOrder(orderData: {
     customer: User;
     deliveryAddress: Order['deliveryAddress'];
     cartItems: {
@@ -352,24 +716,26 @@ export const db = {
       variantId?: string;
       quantity: number;
     }[];
-  }): Order {
-    const products = this.getProducts();
+  }): Promise<Order> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required: You must be logged in to place an order.');
+    }
+
     const ticketId = this.generateOrderTicketId();
     const parentOrderId = `ord-${Date.now()}`;
     const timestamp = new Date().toISOString();
 
-    // 1. Server recalculates prices and validates stock
     let subtotal = 0;
     const orderItems: Order['items'] = [];
     const itemsByVendor: Record<string, Order['items']> = {};
+    const vendorUserIdsSet = new Set<string>();
 
     for (const item of orderData.cartItems) {
-      const product = products.find((p) => p.id === item.productId);
+      const product = memoryProducts.find((p) => p.id === item.productId);
       if (!product) {
         throw new Error(`Product not found: ${item.productId}`);
       }
 
-      // Check stock
       let unitPrice = product.price;
       let variantDesc = '';
 
@@ -377,9 +743,8 @@ export const db = {
         const variant = product.variants.find((v) => v.id === item.variantId);
         if (!variant) throw new Error(`Selected variant not found for ${product.name}`);
         if (variant.stock < item.quantity) {
-          throw new Error(`Insufficient stock for ${product.name} (${variant.color || variant.size || variant.optionName}). Available: ${variant.stock}`);
+          throw new Error(`Insufficient stock for ${product.name}. Available: ${variant.stock}`);
         }
-        // Deduct variant stock
         variant.stock -= item.quantity;
         if (variant.priceDelta) unitPrice += variant.priceDelta;
         variantDesc = [variant.color, variant.size, variant.optionName].filter(Boolean).join(' / ');
@@ -389,7 +754,6 @@ export const db = {
         }
       }
 
-      // Deduct main stock
       product.stock -= item.quantity;
       if (product.stock <= 0) {
         product.status = 'out_of_stock';
@@ -414,57 +778,70 @@ export const db = {
         itemsByVendor[product.vendorId] = [];
       }
       itemsByVendor[product.vendorId].push(orderItem);
+
+      const vendor = memoryVendors.find((v) => v.id === product.vendorId);
+      if (vendor) {
+        vendorUserIdsSet.add(vendor.userId);
+      }
     }
 
-    // Save updated products inventory
-    saveToStorage(STORAGE_KEYS.PRODUCTS, products);
+    // Update product stock in Firestore
+    try {
+      const batch = writeBatch(firestoreDb);
+      for (const item of orderData.cartItems) {
+        const prod = memoryProducts.find((p) => p.id === item.productId);
+        if (prod) {
+          batch.update(doc(firestoreDb, 'products', prod.id), {
+            stock: prod.stock,
+            status: prod.status,
+            salesCount: prod.salesCount,
+            variants: prod.variants
+          });
+        }
+      }
+      await batch.commit();
+    } catch (stockErr) {
+      console.warn('Stock update batch notice:', stockErr);
+    }
 
-    // Dynamic Delivery fee calculation based on state
-    const deliveryZones = this.getDeliveryZones();
+    const deliveryZones = memoryDeliveryZones;
     const matchedZone = deliveryZones.find(
       (z) => z.state.toLowerCase() === orderData.deliveryAddress.state.toLowerCase()
     );
     const deliveryFee = matchedZone ? matchedZone.fee : 4000;
     const total = subtotal + deliveryFee;
 
-    // 2. Create Vendor Sub-orders
-    const subOrders = this.getSubOrders();
     const subOrderIds: string[] = [];
 
-    Object.entries(itemsByVendor).forEach(([vendorId, vItems], index) => {
-      const subOrderId = `sub-${parentOrderId}-v${index + 1}`;
+    // Create suborders for each vendor with proper vendorUserId so vendor ABAC rules work
+    for (const [vId, vItems] of Object.entries(itemsByVendor)) {
+      const subOrderId = `sub-${parentOrderId}-v${subOrderIds.length + 1}`;
       const vSubtotal = vItems.reduce((acc, curr) => acc + curr.unitPrice * curr.quantity, 0);
+      const vendor = memoryVendors.find((v) => v.id === vId);
 
       const subOrder: VendorSubOrder = {
         id: subOrderId,
         parentOrderId,
         orderTicketId: ticketId,
-        vendorId,
+        vendorId: vId,
+        vendorUserId: vendor ? vendor.userId : '',
+        customerId: orderData.customer.id,
         items: vItems,
         subtotal: vSubtotal,
         vendorFulfillmentStatus: 'pending',
         updatedAt: timestamp
       };
 
-      subOrders.push(subOrder);
       subOrderIds.push(subOrderId);
 
-      // Notify vendor about new order
-      const vendor = this.getVendorById(vendorId);
-      if (vendor) {
-        this.createNotification({
-          targetUserId: vendor.userId,
-          title: `New Order Placed: Ticket ${ticketId}`,
-          message: `Customer ${orderData.customer.fullName} placed an order with ${vItems.length} item(s) totaling ₦${vSubtotal.toLocaleString()}. Awaiting admin payment confirmation.`,
-          type: 'order',
-          linkId: ticketId
-        });
+      // Write suborder to Firestore
+      try {
+        await setDoc(doc(firestoreDb, 'suborders', subOrderId), subOrder);
+      } catch (subErr) {
+        handleFirestoreError(subErr, OperationType.CREATE, `suborders/${subOrderId}`);
       }
-    });
+    }
 
-    saveToStorage(STORAGE_KEYS.SUBORDERS, subOrders);
-
-    // 3. Create Parent Order
     const newOrder: Order = {
       id: parentOrderId,
       ticketId,
@@ -475,6 +852,7 @@ export const db = {
       deliveryAddress: orderData.deliveryAddress,
       items: orderItems,
       vendorSubOrderIds: subOrderIds,
+      vendorUserIds: Array.from(vendorUserIdsSet),
       subtotal,
       deliveryFee,
       total,
@@ -492,38 +870,46 @@ export const db = {
       updatedAt: timestamp
     };
 
-    const orders = this.getOrders();
-    orders.unshift(newOrder);
-    saveToStorage(STORAGE_KEYS.ORDERS, orders);
-
-    // Notify customer
-    this.createNotification({
-      targetUserId: orderData.customer.id,
-      title: `Order Created: Ticket ${ticketId}`,
-      message: `Your order for ₦${total.toLocaleString()} is placed. Please transfer to the JAGA Zenith Bank account using ${ticketId} as narration.`,
-      type: 'order',
-      linkId: ticketId
-    });
+    // Write parent order to Firestore
+    try {
+      await setDoc(doc(firestoreDb, 'orders', parentOrderId), newOrder);
+    } catch (orderErr) {
+      handleFirestoreError(orderErr, OperationType.CREATE, `orders/${parentOrderId}`);
+      throw orderErr;
+    }
 
     return newOrder;
   },
 
-  // Bank Transfer Payment Claim
-  submitPaymentClaim(
+  // Submit Bank Transfer Payment Claim
+  async submitPaymentClaim(
     ticketId: string,
-    claimInput: {
+    arg2: any,
+    arg3?: any,
+    arg4?: string
+  ): Promise<Order> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required.');
+    }
+
+    let orderId = '';
+    let claimInput: {
       bankPaidFrom: string;
       accountSenderName: string;
       transactionReference: string;
       claimedAmount: number;
       receiptImageUrl?: string;
-    },
-    customerId: string
-  ): Order {
-    const orders = this.getOrders();
-    const order = orders.find((o) => o.ticketId === ticketId);
-    if (!order) throw new Error('Order not found with ticket ID');
-    if (order.customerId !== customerId) throw new Error('Unauthorized');
+    };
+    let customerId = '';
+
+    if (typeof arg2 === 'string') {
+      orderId = arg2;
+      claimInput = arg3;
+      customerId = arg4 || auth.currentUser.uid;
+    } else {
+      claimInput = arg2;
+      customerId = arg3 || auth.currentUser.uid;
+    }
 
     const claim: PaymentClaim = {
       id: `claim-${Date.now()}`,
@@ -536,518 +922,620 @@ export const db = {
       submittedAt: new Date().toISOString()
     };
 
-    order.paymentClaim = claim;
-    order.paymentStatus = 'payment_claimed';
-    order.timeline.push({
-      timestamp: new Date().toISOString(),
-      title: 'Payment Claim Submitted',
-      description: `Customer submitted payment claim: ${claimInput.transactionReference} from ${claimInput.bankPaidFrom} (${claimInput.accountSenderName}).`,
-      actor: 'customer'
-    });
-    order.updatedAt = new Date().toISOString();
+    const timestamp = new Date().toISOString();
 
-    saveToStorage(STORAGE_KEYS.ORDERS, orders);
+    // If orderId was not provided, look it up by ticketId
+    if (!orderId) {
+      const q = query(collection(firestoreDb, 'orders'), where('ticketId', '==', ticketId));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        orderId = snap.docs[0].id;
+      } else {
+        throw new Error(`Order with ticket ID ${ticketId} not found in Firestore.`);
+      }
+    }
 
-    // Notify Admins to verify
-    this.createNotification({
-      targetUserId: 'admin',
-      targetRole: 'admin',
-      title: `Payment Claim: Ticket ${ticketId}`,
-      message: `Customer ${order.customerName} claimed transfer of ₦${claimInput.claimedAmount.toLocaleString()} (Ref: ${claimInput.transactionReference}). Please verify in bank statement.`,
-      type: 'payment',
-      linkId: ticketId
-    });
+    try {
+      // 1. Isolate sensitive bank receipt evidence in /orders/{orderId}/private/payment
+      await setDoc(doc(firestoreDb, `orders/${orderId}/private`, 'payment'), claim);
 
-    return order;
+      // 2. Update order status and append to timeline
+      const orderRef = doc(firestoreDb, 'orders', orderId);
+      const snap = await getDoc(orderRef);
+      if (!snap.exists()) throw new Error('Order not found in Firestore.');
+      const orderData = snap.data() as Order;
+
+      const updatedTimeline = [
+        ...(orderData.timeline || []),
+        {
+          timestamp,
+          title: 'Payment Claim Submitted',
+          description: `Payment claimed: ${claimInput.transactionReference} from ${claimInput.bankPaidFrom} (${claimInput.accountSenderName}).`,
+          actor: 'customer' as const
+        }
+      ];
+
+      await updateDoc(orderRef, {
+        paymentStatus: 'payment_claimed',
+        timeline: updatedTimeline,
+        updatedAt: timestamp
+      });
+
+      return {
+        ...orderData,
+        paymentStatus: 'payment_claimed',
+        timeline: updatedTimeline,
+        updatedAt: timestamp,
+        paymentClaim: claim
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `orders/${orderId}/private/payment`);
+      throw err;
+    }
   },
 
   // Admin Payment Verification
-  verifyPaymentClaim(
-    ticketId: string,
-    decision: 'confirmed' | 'rejected',
-    adminNote: string,
-    adminName = 'JAGA Admin'
-  ): Order {
-    const orders = this.getOrders();
-    const order = orders.find((o) => o.ticketId === ticketId);
-    if (!order) throw new Error('Order not found');
-
-    const timestamp = new Date().toISOString();
-
-    if (decision === 'confirmed') {
-      order.paymentStatus = 'confirmed';
-      order.orderStatus = 'processing';
-      if (order.paymentClaim) {
-        order.paymentClaim.verifiedByAdmin = adminName;
-        order.paymentClaim.adminVerifierNote = adminNote;
-        order.paymentClaim.verifiedAt = timestamp;
-      }
-
-      order.timeline.push({
-        timestamp,
-        title: 'Payment Confirmed by Admin',
-        description: `Verified with bank statement. Note: ${adminNote}`,
-        actor: 'admin'
-      });
-
-      // Update vendor suborders and notify vendors
-      const subOrders = this.getSubOrders();
-      const updatedSubOrders = subOrders.map((sub) => {
-        if (sub.orderTicketId === ticketId) {
-          return {
-            ...sub,
-            vendorFulfillmentStatus: 'accepted' as const,
-            updatedAt: timestamp
-          };
-        }
-        return sub;
-      });
-      saveToStorage(STORAGE_KEYS.SUBORDERS, updatedSubOrders);
-
-      // Notify customer
-      this.createNotification({
-        targetUserId: order.customerId,
-        title: `Payment Confirmed: Ticket ${ticketId}`,
-        message: `Your payment of ₦${order.total.toLocaleString()} has been confirmed! Vendors are now preparing your items for delivery.`,
-        type: 'payment',
-        linkId: ticketId
-      });
-
-      // Notify each vendor
-      const uniqueVendorIds = [...new Set(order.items.map((i) => i.vendorId))];
-      uniqueVendorIds.forEach((vId) => {
-        const vendor = this.getVendorById(vId);
-        if (vendor) {
-          this.createNotification({
-            targetUserId: vendor.userId,
-            title: `Payment Confirmed for Ticket ${ticketId}`,
-            message: `Bank payment verified! Please start preparing your order items for dispatch.`,
-            type: 'order',
-            linkId: ticketId
-          });
-        }
-      });
-
-      // Audit Log
-      this.addAuditLog({
-        adminName,
-        action: 'PAYMENT_CONFIRMED',
-        details: `Confirmed payment for ticket ${ticketId} (₦${order.total.toLocaleString()}). Note: ${adminNote}`,
-        targetRef: ticketId
-      });
-    } else {
-      order.paymentStatus = 'rejected';
-      if (order.paymentClaim) {
-        order.paymentClaim.verifiedByAdmin = adminName;
-        order.paymentClaim.adminVerifierNote = adminNote;
-        order.paymentClaim.verifiedAt = timestamp;
-      }
-
-      order.timeline.push({
-        timestamp,
-        title: 'Payment Claim Rejected',
-        description: `Admin rejected payment claim. Reason: ${adminNote}`,
-        actor: 'admin'
-      });
-
-      // Notify customer
-      this.createNotification({
-        targetUserId: order.customerId,
-        title: `Payment Verification Issue: Ticket ${ticketId}`,
-        message: `We could not verify your bank transfer claim. Reason: ${adminNote}. Please check your transaction details or contact support.`,
-        type: 'payment',
-        linkId: ticketId
-      });
-
-      // Audit Log
-      this.addAuditLog({
-        adminName,
-        action: 'PAYMENT_CLAIM_REJECTED',
-        details: `Rejected payment claim for ticket ${ticketId}. Reason: ${adminNote}`,
-        targetRef: ticketId
-      });
+  async verifyPaymentClaim(
+    arg1: string,
+    arg2: any,
+    arg3?: any,
+    arg4?: any,
+    arg5?: string
+  ): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Admin authentication required.');
     }
 
-    order.updatedAt = timestamp;
-    saveToStorage(STORAGE_KEYS.ORDERS, orders);
-    return order;
+    let orderId = '';
+    let ticketId = '';
+    let decision: 'confirmed' | 'rejected';
+    let adminNote = '';
+    let adminName = 'JAGA Admin';
+
+    if (arg5 !== undefined) {
+      orderId = arg1;
+      ticketId = arg2;
+      decision = arg3;
+      adminNote = arg4;
+      adminName = arg5;
+    } else {
+      ticketId = arg1;
+      decision = arg2;
+      adminNote = arg3 || '';
+      adminName = arg4 || 'JAGA Admin';
+    }
+
+    if (!orderId) {
+      const q = query(collection(firestoreDb, 'orders'), where('ticketId', '==', ticketId));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        orderId = snap.docs[0].id;
+      } else {
+        throw new Error(`Order ${ticketId} not found.`);
+      }
+    }
+
+    const timestamp = new Date().toISOString();
+    const orderRef = doc(firestoreDb, 'orders', orderId);
+
+    try {
+      const snap = await getDoc(orderRef);
+      if (!snap.exists()) throw new Error('Order not found');
+      const orderData = snap.data() as Order;
+
+      const isConfirmed = decision === 'confirmed';
+      const updatedTimeline = [
+        ...(orderData.timeline || []),
+        {
+          timestamp,
+          title: isConfirmed ? 'Payment Confirmed by Admin' : 'Payment Claim Rejected',
+          description: isConfirmed
+            ? `Verified with bank statement. Note: ${adminNote}`
+            : `Admin rejected payment claim. Reason: ${adminNote}`,
+          actor: 'admin' as const
+        }
+      ];
+
+      await updateDoc(orderRef, {
+        paymentStatus: isConfirmed ? 'confirmed' : 'rejected',
+        orderStatus: isConfirmed ? 'processing' : orderData.orderStatus,
+        timeline: updatedTimeline,
+        updatedAt: timestamp
+      });
+
+      // Update related suborders
+      if (orderData.vendorSubOrderIds && orderData.vendorSubOrderIds.length > 0) {
+        for (const subId of orderData.vendorSubOrderIds) {
+          try {
+            await updateDoc(doc(firestoreDb, 'suborders', subId), {
+              vendorFulfillmentStatus: isConfirmed ? 'accepted' : 'pending',
+              updatedAt: timestamp
+            });
+          } catch (e) {
+            console.warn('Suborder status update notice:', e);
+          }
+        }
+      }
+
+      await this.addAuditLog({
+        adminName,
+        action: isConfirmed ? 'PAYMENT_CONFIRMED' : 'PAYMENT_CLAIM_REJECTED',
+        details: `${decision.toUpperCase()} payment for ticket ${ticketId}. Note: ${adminNote}`,
+        targetRef: ticketId
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+      throw err;
+    }
   },
 
   // Vendor order fulfillment
-  updateVendorSubOrderStatus(
+  async updateVendorSubOrderStatus(
     subOrderId: string,
     status: VendorSubOrder['vendorFulfillmentStatus'],
     vendorUserId: string,
     notes?: string
-  ): VendorSubOrder {
-    const vendor = this.getVendorByUserId(vendorUserId);
-    if (!vendor) throw new Error('Vendor profile not found');
-
-    const subOrders = this.getSubOrders();
-    const subOrder = subOrders.find((s) => s.id === subOrderId);
-    if (!subOrder) throw new Error('Sub-order not found');
-    if (subOrder.vendorId !== vendor.id) throw new Error('Unauthorized');
-
-    subOrder.vendorFulfillmentStatus = status;
-    if (notes) subOrder.vendorNotes = notes;
-    subOrder.updatedAt = new Date().toISOString();
-
-    saveToStorage(STORAGE_KEYS.SUBORDERS, subOrders);
-
-    // Update parent order timeline
-    const orders = this.getOrders();
-    const parentOrder = orders.find((o) => o.id === subOrder.parentOrderId);
-    if (parentOrder) {
-      parentOrder.timeline.push({
-        timestamp: new Date().toISOString(),
-        title: `Vendor Update: ${status.replace('_', ' ').toUpperCase()}`,
-        description: `${vendor.businessName} updated fulfillment status to ${status}. ${notes ? 'Note: ' + notes : ''}`,
-        actor: 'vendor'
-      });
-      saveToStorage(STORAGE_KEYS.ORDERS, orders);
-
-      // Notify customer
-      this.createNotification({
-        targetUserId: parentOrder.customerId,
-        title: `Order Update: Ticket ${parentOrder.ticketId}`,
-        message: `${vendor.businessName} marked your items as "${status.replace('_', ' ')}".`,
-        type: 'order',
-        linkId: parentOrder.ticketId
-      });
+  ): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required.');
     }
 
-    return subOrder;
+    const timestamp = new Date().toISOString();
+
+    try {
+      await updateDoc(doc(firestoreDb, 'suborders', subOrderId), {
+        vendorFulfillmentStatus: status,
+        vendorNotes: notes || '',
+        updatedAt: timestamp
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `suborders/${subOrderId}`);
+      throw err;
+    }
   },
 
   // Admin Delivery Scheduling
-  updateDeliverySchedule(
-    ticketId: string,
-    scheduledDate: string,
-    courier: string,
-    trackingNumber: string,
-    adminName = 'JAGA Admin'
-  ): Order {
-    const orders = this.getOrders();
-    const order = orders.find((o) => o.ticketId === ticketId);
-    if (!order) throw new Error('Order not found');
-
-    order.scheduledDeliveryDate = scheduledDate;
-    order.deliveryCourier = courier;
-    order.trackingNumber = trackingNumber;
-    order.orderStatus = 'in_transit';
-    order.updatedAt = new Date().toISOString();
-
-    order.timeline.push({
-      timestamp: new Date().toISOString(),
-      title: 'Delivery Scheduled & In Transit',
-      description: `Estimated arrival: ${scheduledDate} via ${courier}. Tracking: ${trackingNumber || 'Available locally'}`,
-      actor: 'admin'
-    });
-
-    saveToStorage(STORAGE_KEYS.ORDERS, orders);
-
-    // Notify customer
-    this.createNotification({
-      targetUserId: order.customerId,
-      title: `Delivery Scheduled for Ticket ${ticketId}`,
-      message: `Your order is on the way! Estimated delivery date: ${scheduledDate} via ${courier}.`,
-      type: 'order',
-      linkId: ticketId
-    });
-
-    // Audit
-    this.addAuditLog({
-      adminName,
-      action: 'DELIVERY_SCHEDULED',
-      details: `Scheduled delivery for ${ticketId} with ${courier} on ${scheduledDate}`,
-      targetRef: ticketId
-    });
-
-    return order;
-  },
-
-  // Cancellation Rules & Stock Restoration
-  cancelOrder(
-    ticketId: string,
-    reason: string,
-    actorRole: 'customer' | 'vendor' | 'admin',
-    actorUserId: string
-  ): Order {
-    const orders = this.getOrders();
-    const order = orders.find((o) => o.ticketId === ticketId);
-    if (!order) throw new Error('Order not found');
-
-    if (order.orderStatus === 'delivered' || order.orderStatus === 'cancelled') {
-      throw new Error(`Order cannot be cancelled in status: ${order.orderStatus}`);
+  async updateDeliverySchedule(
+    arg1: string,
+    arg2: any,
+    arg3?: any,
+    arg4?: any,
+    arg5?: any,
+    arg6?: string
+  ): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Admin authentication required.');
     }
 
-    // Role checks
-    if (actorRole === 'customer') {
-      if (order.customerId !== actorUserId) throw new Error('Unauthorized');
-      if (order.orderStatus === 'in_transit') {
-        throw new Error('Orders already in transit cannot be cancelled by customer directly. Please contact support.');
+    let orderId = '';
+    let ticketId = '';
+    let scheduledDate = '';
+    let courier = '';
+    let trackingNumber = '';
+    let adminName = 'JAGA Admin';
+
+    if (arg6 !== undefined) {
+      orderId = arg1;
+      ticketId = arg2;
+      scheduledDate = arg3;
+      courier = arg4;
+      trackingNumber = arg5;
+      adminName = arg6;
+    } else {
+      ticketId = arg1;
+      scheduledDate = arg2;
+      courier = arg3;
+      trackingNumber = arg4;
+      adminName = arg5 || 'JAGA Admin';
+    }
+
+    if (!orderId) {
+      const q = query(collection(firestoreDb, 'orders'), where('ticketId', '==', ticketId));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        orderId = snap.docs[0].id;
+      } else {
+        throw new Error(`Order ${ticketId} not found.`);
       }
     }
 
-    // Restore stock in inventory
-    const products = this.getProducts();
-    order.items.forEach((item) => {
-      const prod = products.find((p) => p.id === item.productId);
-      if (prod) {
-        prod.stock += item.quantity;
-        if (prod.status === 'out_of_stock' && prod.stock > 0) {
-          prod.status = 'published';
+    const timestamp = new Date().toISOString();
+    const orderRef = doc(firestoreDb, 'orders', orderId);
+
+    try {
+      const snap = await getDoc(orderRef);
+      if (!snap.exists()) throw new Error('Order not found');
+      const order = snap.data() as Order;
+
+      const updatedTimeline = [
+        ...(order.timeline || []),
+        {
+          timestamp,
+          title: 'Delivery Scheduled & In Transit',
+          description: `Estimated arrival: ${scheduledDate} via ${courier}. Tracking: ${trackingNumber || 'Available locally'}`,
+          actor: 'admin' as const
         }
-        if (item.variantId) {
-          const variant = prod.variants.find((v) => v.id === item.variantId);
-          if (variant) {
-            variant.stock += item.quantity;
+      ];
+
+      await updateDoc(orderRef, {
+        scheduledDeliveryDate: scheduledDate,
+        deliveryCourier: courier,
+        trackingNumber,
+        orderStatus: 'in_transit',
+        updatedAt: timestamp,
+        timeline: updatedTimeline
+      });
+
+      await this.addAuditLog({
+        adminName,
+        action: 'DELIVERY_SCHEDULED',
+        details: `Scheduled delivery for ${ticketId} with ${courier} on ${scheduledDate}`,
+        targetRef: ticketId
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+      throw err;
+    }
+  },
+
+  // Order Cancellation & Stock Restoration
+  async cancelOrder(
+    arg1: string,
+    arg2: string,
+    arg3?: string,
+    arg4?: any,
+    arg5?: string
+  ): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required.');
+    }
+
+    let orderId = '';
+    let ticketId = '';
+    let reason = '';
+    let actorRole: 'customer' | 'vendor' | 'admin' = 'customer';
+    let actorUserId = '';
+
+    if (arg5 !== undefined) {
+      orderId = arg1;
+      ticketId = arg2;
+      reason = arg3 || '';
+      actorRole = arg4;
+      actorUserId = arg5;
+    } else {
+      ticketId = arg1;
+      reason = arg2;
+      actorRole = (arg3 as any) || 'customer';
+      actorUserId = arg4 || auth.currentUser.uid;
+    }
+
+    if (!orderId) {
+      const q = query(collection(firestoreDb, 'orders'), where('ticketId', '==', ticketId));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        orderId = snap.docs[0].id;
+      } else {
+        throw new Error(`Order ${ticketId} not found.`);
+      }
+    }
+
+    const timestamp = new Date().toISOString();
+    const orderRef = doc(firestoreDb, 'orders', orderId);
+
+    try {
+      const snap = await getDoc(orderRef);
+      if (!snap.exists()) throw new Error('Order not found');
+      const order = snap.data() as Order;
+
+      if (order.orderStatus === 'delivered' || order.orderStatus === 'cancelled') {
+        throw new Error(`Order cannot be cancelled in status: ${order.orderStatus}`);
+      }
+
+      // Restore inventory in Firestore
+      const batch = writeBatch(firestoreDb);
+      for (const item of order.items) {
+        const prod = memoryProducts.find((p) => p.id === item.productId);
+        if (prod) {
+          prod.stock += item.quantity;
+          if (prod.status === 'out_of_stock' && prod.stock > 0) {
+            prod.status = 'published';
           }
+          batch.update(doc(firestoreDb, 'products', prod.id), {
+            stock: prod.stock,
+            status: prod.status
+          });
         }
       }
-    });
-    saveToStorage(STORAGE_KEYS.PRODUCTS, products);
+      await batch.commit();
 
-    const timestamp = new Date().toISOString();
-    order.orderStatus = 'cancelled';
-    order.cancellationReason = reason;
-    order.cancelledBy = actorRole;
-    if (order.paymentStatus === 'confirmed') {
-      order.paymentStatus = 'refund_pending';
+      const nextPaymentStatus = order.paymentStatus === 'confirmed' ? 'refund_pending' : order.paymentStatus;
+      const updatedTimeline = [
+        ...(order.timeline || []),
+        {
+          timestamp,
+          title: `Order Cancelled by ${actorRole.toUpperCase()}`,
+          description: `Reason: ${reason}. Inventory restored.${nextPaymentStatus === 'refund_pending' ? ' Refund is pending admin processing.' : ''}`,
+          actor: actorRole
+        }
+      ];
+
+      await updateDoc(orderRef, {
+        orderStatus: 'cancelled',
+        cancellationReason: reason,
+        cancelledBy: actorRole,
+        paymentStatus: nextPaymentStatus,
+        updatedAt: timestamp,
+        timeline: updatedTimeline
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+      throw err;
+    }
+  },
+
+  // 4. SOURCING REQUESTS (Live Cloud Firestore)
+  generateSourcingTicketId(): string {
+    const currentYear = new Date().getFullYear();
+    const randomHex = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `JAG-REQ-${currentYear}-${randomHex}`;
+  },
+
+  subscribeSourcingRequests(
+    userId: string | null,
+    role: UserRole | null,
+    callback: (reqs: ProductSourcingRequest[]) => void
+  ): Unsubscribe {
+    if (!userId || !auth.currentUser) {
+      callback([]);
+      return () => {};
     }
 
-    order.timeline.push({
-      timestamp,
-      title: `Order Cancelled by ${actorRole.toUpperCase()}`,
-      description: `Reason: ${reason}. Inventory restored.${order.paymentStatus === 'refund_pending' ? ' Refund is pending admin processing.' : ''}`,
-      actor: actorRole
-    });
+    let q;
+    if (role === 'admin') {
+      q = collection(firestoreDb, 'sourcing_requests');
+    } else {
+      q = query(collection(firestoreDb, 'sourcing_requests'), where('customerId', '==', userId));
+    }
 
-    saveToStorage(STORAGE_KEYS.ORDERS, orders);
-
-    // Notify customer & affected vendors
-    this.createNotification({
-      targetUserId: order.customerId,
-      title: `Order Cancelled: Ticket ${ticketId}`,
-      message: `Your order was cancelled by ${actorRole}. Reason: ${reason}.${order.paymentStatus === 'refund_pending' ? ' Refund request is registered.' : ''}`,
-      type: 'order',
-      linkId: ticketId
-    });
-
-    return order;
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const reqs: ProductSourcingRequest[] = [];
+        snapshot.forEach((d) => reqs.push(d.data() as ProductSourcingRequest));
+        callback(reqs);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'sourcing_requests');
+        callback([]);
+      }
+    );
   },
 
-  // Sourcing Requests
-  getSourcingRequests(): ProductSourcingRequest[] {
-    return getFromStorage<ProductSourcingRequest[]>(STORAGE_KEYS.SOURCING_REQUESTS, INITIAL_SOURCING_REQUESTS);
-  },
+  async createSourcingRequest(
+    requestData: any,
+    customerArg?: User
+  ): Promise<ProductSourcingRequest> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required to submit sourcing requests.');
+    }
 
-  generateSourcingRequestId(): string {
-    const list = this.getSourcingRequests();
-    const count = list.length + 35;
-    const year = new Date().getFullYear();
-    return `JAG-REQ-${year}-${String(count).padStart(6, '0')}`;
-  },
-
-  createSourcingRequest(
-    data: Omit<ProductSourcingRequest, 'id' | 'requestId' | 'createdAt' | 'updatedAt' | 'status'>
-  ): ProductSourcingRequest {
-    const list = this.getSourcingRequests();
-    const requestId = this.generateSourcingRequestId();
+    const ticketId = this.generateSourcingTicketId();
+    const reqId = `req-${Date.now()}`;
     const timestamp = new Date().toISOString();
 
-    const newRequest: ProductSourcingRequest = {
-      ...data,
-      id: `req-${Date.now()}`,
-      requestId,
+    const customerId = customerArg?.id || requestData.customerId || auth.currentUser.uid;
+    const customerName = customerArg?.fullName || requestData.customerName || auth.currentUser.displayName || 'Customer';
+    const customerPhone = customerArg?.phone || requestData.customerPhone || '';
+    const customerEmail = customerArg?.email || requestData.customerEmail || auth.currentUser.email || '';
+
+    const newReq: ProductSourcingRequest = {
+      ...requestData,
+      id: reqId,
+      requestId: ticketId,
+      ticketId,
+      customerId,
+      customerName,
+      customerPhone,
+      customerEmail,
       status: 'submitted',
-      createdAt: timestamp,
-      updatedAt: timestamp
+      createdAt: timestamp
     };
 
-    list.unshift(newRequest);
-    saveToStorage(STORAGE_KEYS.SOURCING_REQUESTS, list);
+    try {
+      await setDoc(doc(firestoreDb, 'sourcing_requests', reqId), newReq);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `sourcing_requests/${reqId}`);
+      throw err;
+    }
 
-    // Notify Admin
-    this.createNotification({
-      targetUserId: 'admin',
-      targetRole: 'admin',
-      title: `New Product Request: ${requestId}`,
-      message: `${data.customerName} requested sourcing for "${data.productName}" (Budget: ₦${data.expectedBudgetNgn?.toLocaleString() || 'Negotiable'}).`,
-      type: 'request',
-      linkId: requestId
-    });
-
-    return newRequest;
+    return newReq;
   },
 
-  addQuotationToRequest(
+  async submitQuotation(
     requestId: string,
-    quotation: {
+    quotedPrice: number,
+    estimatedDays: number,
+    adminNotes: string,
+    adminName = 'JAGA Admin'
+  ): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Admin authentication required.');
+    }
+
+    const timestamp = new Date().toISOString();
+
+    try {
+      await updateDoc(doc(firestoreDb, 'sourcing_requests', requestId), {
+        quotedPrice,
+        estimatedDeliveryDays: estimatedDays,
+        adminNotes,
+        status: 'quoted',
+        updatedAt: timestamp
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `sourcing_requests/${requestId}`);
+      throw err;
+    }
+  },
+
+  async addQuotationToRequest(
+    requestId: string,
+    quote: {
       quotedPriceNgn: number;
       estimatedDeliveryDays: number;
       sourcingNotes: string;
     },
     adminName = 'JAGA Admin'
-  ): ProductSourcingRequest {
-    const list = this.getSourcingRequests();
-    const req = list.find((r) => r.requestId === requestId || r.id === requestId);
-    if (!req) throw new Error('Sourcing request not found');
-
-    const timestamp = new Date().toISOString();
-    req.quotation = {
-      ...quotation,
-      quotedAt: timestamp,
-      quotedByAdmin: adminName
-    };
-    req.status = 'quotation_ready';
-    req.updatedAt = timestamp;
-
-    saveToStorage(STORAGE_KEYS.SOURCING_REQUESTS, list);
-
-    // Notify customer
-    this.createNotification({
-      targetUserId: req.customerId,
-      title: `Quotation Ready: Request ${req.requestId}`,
-      message: `Admin provided quotation of ₦${quotation.quotedPriceNgn.toLocaleString()} for your requested "${req.productName}". Click to review and accept.`,
-      type: 'request',
-      linkId: req.requestId
-    });
-
-    // Audit
-    this.addAuditLog({
-      adminName,
-      action: 'SOURCING_QUOTATION_SENT',
-      details: `Quoted ₦${quotation.quotedPriceNgn.toLocaleString()} for request ${req.requestId}`,
-      targetRef: req.requestId
-    });
-
-    return req;
+  ): Promise<void> {
+    return this.submitQuotation(
+      requestId,
+      quote.quotedPriceNgn,
+      quote.estimatedDeliveryDays,
+      quote.sourcingNotes,
+      adminName
+    );
   },
 
-  respondToQuotation(
+  createNotification(notif: any): void {
+    // Notifications helper
+  },
+
+  markNotificationAsRead(notifId: string): void {
+    // Mark notification read helper
+  },
+
+  async respondToQuotation(
     requestId: string,
     decision: 'accepted' | 'declined',
-    customerUserId: string
-  ): ProductSourcingRequest {
-    const list = this.getSourcingRequests();
-    const req = list.find((r) => r.requestId === requestId || r.id === requestId);
-    if (!req) throw new Error('Request not found');
-    if (req.customerId !== customerUserId) throw new Error('Unauthorized');
+    customerId: string
+  ): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Authentication required.');
+    }
 
     const timestamp = new Date().toISOString();
-    req.customerDecision = decision;
-    req.customerDecisionDate = timestamp;
 
-    if (decision === 'accepted') {
-      req.status = 'accepted';
-      // Notify admin
-      this.createNotification({
-        targetUserId: 'admin',
-        targetRole: 'admin',
-        title: `Customer Accepted Quote: ${req.requestId}`,
-        message: `${req.customerName} accepted the quotation of ₦${req.quotation?.quotedPriceNgn.toLocaleString()}. Ready to proceed to payment.`,
-        type: 'request',
-        linkId: req.requestId
+    try {
+      await updateDoc(doc(firestoreDb, 'sourcing_requests', requestId), {
+        customerDecision: decision,
+        status: decision === 'accepted' ? 'accepted' : 'closed',
+        updatedAt: timestamp
       });
-    } else {
-      req.status = 'closed';
-      this.createNotification({
-        targetUserId: 'admin',
-        targetRole: 'admin',
-        title: `Customer Declined Quote: ${req.requestId}`,
-        message: `${req.customerName} declined the quotation.`,
-        type: 'request',
-        linkId: req.requestId
-      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `sourcing_requests/${requestId}`);
+      throw err;
     }
-
-    req.updatedAt = timestamp;
-    saveToStorage(STORAGE_KEYS.SOURCING_REQUESTS, list);
-    return req;
   },
 
-  // Bank Settings
+  // 5. SETTINGS & DELIVERY ZONES
   getBankSettings(): BankSettings {
-    return getFromStorage<BankSettings>(STORAGE_KEYS.BANK_SETTINGS, INITIAL_BANK_SETTINGS);
+    return memoryBankSettings;
   },
 
-  updateBankSettings(settings: BankSettings, adminName = 'JAGA Admin'): BankSettings {
-    saveToStorage(STORAGE_KEYS.BANK_SETTINGS, settings);
-    this.addAuditLog({
-      adminName,
-      action: 'BANK_SETTINGS_UPDATED',
-      details: `Bank settings updated to ${settings.bankName} - ${settings.accountNumber} (${settings.accountName})`,
-      targetRef: 'BANK_SETTINGS'
-    });
-    return settings;
+  subscribeBankSettings(callback: (settings: BankSettings) => void): Unsubscribe {
+    const bankDoc = doc(firestoreDb, 'settings', 'bank');
+    return onSnapshot(
+      bankDoc,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          memoryBankSettings = snapshot.data() as BankSettings;
+          callback(memoryBankSettings);
+        } else {
+          callback(INITIAL_BANK_SETTINGS);
+        }
+      },
+      () => {
+        callback(INITIAL_BANK_SETTINGS);
+      }
+    );
   },
 
-  // Delivery Zones
-  getDeliveryZones(): DeliveryZone[] {
-    return getFromStorage<DeliveryZone[]>(STORAGE_KEYS.DELIVERY_ZONES, INITIAL_DELIVERY_ZONES);
-  },
+  async updateBankSettings(newSettings: BankSettings, adminName = 'JAGA Admin'): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Admin authentication required.');
+    }
 
-  // Notifications
-  getNotifications(): InAppNotification[] {
-    return getFromStorage<InAppNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
-  },
-
-  getUserNotifications(userId: string, role?: string): InAppNotification[] {
-    const all = this.getNotifications();
-    return all.filter((n) => {
-      if (n.targetUserId === userId) return true;
-      if (role === 'admin' && (n.targetRole === 'admin' || n.targetUserId === 'admin')) return true;
-      return false;
-    });
-  },
-
-  createNotification(notif: Omit<InAppNotification, 'id' | 'read' | 'createdAt'>): InAppNotification {
-    const all = this.getNotifications();
-    const newNotif: InAppNotification = {
-      ...notif,
-      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      read: false,
-      createdAt: new Date().toISOString()
-    };
-    all.unshift(newNotif);
-    saveToStorage(STORAGE_KEYS.NOTIFICATIONS, all);
-    return newNotif;
-  },
-
-  markNotificationAsRead(id: string): void {
-    const all = this.getNotifications();
-    const notif = all.find((n) => n.id === id);
-    if (notif) {
-      notif.read = true;
-      saveToStorage(STORAGE_KEYS.NOTIFICATIONS, all);
+    try {
+      await setDoc(doc(firestoreDb, 'settings', 'bank'), newSettings);
+      memoryBankSettings = newSettings;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/bank');
+      throw err;
     }
   },
 
-  markAllNotificationsAsRead(userId: string): void {
-    const all = this.getNotifications();
-    all.forEach((n) => {
-      if (n.targetUserId === userId || n.targetUserId === 'admin') {
-        n.read = true;
+  getDeliveryZones(): DeliveryZone[] {
+    return memoryDeliveryZones;
+  },
+
+  // 6. AUDIT LOGS
+  async addAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): Promise<void> {
+    try {
+      const logId = `log-${Date.now()}`;
+      await setDoc(doc(firestoreDb, 'audit_logs', logId), {
+        ...entry,
+        id: logId,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) {
+      console.warn('Audit log write notice:', e);
+    }
+  },
+
+  // 7. CATALOG INITIALIZATION (Seeds verified Nigerian products & vendors into Firestore)
+  async seedInitialCatalogToFirestore(): Promise<{ count: number; message: string }> {
+    if (!auth.currentUser) {
+      throw new Error('Admin authentication required: Please sign in as Administrator to initialize catalog.');
+    }
+
+    try {
+      const batch = writeBatch(firestoreDb);
+
+      // Seed Nigerian Vendors
+      for (const vendor of INITIAL_VENDORS) {
+        const vRef = doc(firestoreDb, 'vendors', vendor.id);
+        batch.set(vRef, {
+          id: vendor.id,
+          userId: vendor.userId,
+          businessName: vendor.businessName,
+          ownerName: vendor.ownerName,
+          email: vendor.email,
+          phone: vendor.phone,
+          businessAddress: vendor.businessAddress,
+          state: vendor.state,
+          lga: vendor.lga,
+          category: vendor.category,
+          kycStatus: vendor.kycStatus,
+          rating: vendor.rating,
+          totalSales: vendor.totalSales,
+          joinedDate: vendor.joinedDate
+        });
       }
-    });
-    saveToStorage(STORAGE_KEYS.NOTIFICATIONS, all);
-  },
 
-  // Audit Logs
-  getAuditLogs(): AuditLogEntry[] {
-    return getFromStorage<AuditLogEntry[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
-  },
+      // Seed Nigerian Products
+      for (const prod of INITIAL_PRODUCTS) {
+        const pRef = doc(firestoreDb, 'products', prod.id);
+        batch.set(pRef, prod);
+      }
 
-  addAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): AuditLogEntry {
-    const logs = this.getAuditLogs();
-    const newEntry: AuditLogEntry = {
-      ...entry,
-      id: `audit-${Date.now()}`,
-      timestamp: new Date().toISOString()
-    };
-    logs.unshift(newEntry);
-    saveToStorage(STORAGE_KEYS.AUDIT_LOGS, logs);
-    return newEntry;
+      // Seed Bank Settings
+      const bankRef = doc(firestoreDb, 'settings', 'bank');
+      batch.set(bankRef, INITIAL_BANK_SETTINGS);
+
+      await batch.commit();
+
+      // Refresh in-memory list
+      memoryProducts = [...INITIAL_PRODUCTS];
+      memoryVendors = [...INITIAL_VENDORS];
+      memoryBankSettings = INITIAL_BANK_SETTINGS;
+
+      return {
+        count: INITIAL_PRODUCTS.length,
+        message: `Successfully seeded ${INITIAL_PRODUCTS.length} authentic Nigerian products and verified vendors into Cloud Firestore!`
+      };
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.WRITE, 'seedInitialCatalogToFirestore');
+      throw err;
+    }
   }
 };

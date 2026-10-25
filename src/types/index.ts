@@ -2,6 +2,7 @@ export type UserRole = 'customer' | 'vendor' | 'admin';
 
 export interface User {
   id: string;
+  userId?: string;
   role: UserRole;
   fullName: string;
   email: string;
@@ -16,6 +17,57 @@ export interface User {
 }
 
 export type KycStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
+
+export type VendorApplicationStatus =
+  | 'not_applied'
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'needs_changes'
+  | 'suspended';
+
+export interface VendorPayoutBank {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+}
+
+export interface VendorApplicationHistoryEntry {
+  status: VendorApplicationStatus;
+  notes?: string;
+  adminUid?: string;
+  adminEmail?: string;
+  timestamp: string;
+}
+
+export interface VendorApplication {
+  id: string;
+  userId: string;
+  legalName: string;
+  phone: string;
+  businessName: string;
+  businessAddress: string;
+  state: string;
+  lga?: string;
+  businessDescription: string;
+  category: string;
+  cacNumber?: string;
+  tinNumber?: string;
+  idType: string;
+  idDocumentUrl: string;
+  cacCertificateUrl?: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  status: VendorApplicationStatus;
+  adminNotes?: string;
+  reviewedByAdminUid?: string;
+  reviewedByAdminEmail?: string;
+  reviewedAt?: string;
+  submittedAt: string;
+  updatedAt: string;
+  history?: VendorApplicationHistoryEntry[];
+}
 
 export interface VendorProfile {
   id: string;
@@ -137,6 +189,8 @@ export interface VendorSubOrder {
   parentOrderId: string;
   orderTicketId: string;
   vendorId: string;
+  vendorUserId?: string;
+  customerId?: string;
   items: OrderItem[];
   subtotal: number;
   vendorFulfillmentStatus: 'pending' | 'accepted' | 'preparing' | 'ready_for_dispatch' | 'dispatched' | 'cancelled';
@@ -183,6 +237,7 @@ export interface Order {
   };
   items: OrderItem[];
   vendorSubOrderIds: string[];
+  vendorUserIds?: string[];
   subtotal: number;
   deliveryFee: number;
   total: number;
@@ -213,6 +268,7 @@ export type ProductRequestStatus =
 export interface ProductSourcingRequest {
   id: string;
   requestId: string; // e.g. JAG-REQ-2026-000045
+  ticketId?: string;
   customerId: string;
   customerName: string;
   customerEmail: string;

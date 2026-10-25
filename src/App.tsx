@@ -23,8 +23,11 @@ import { VendorDashboard } from './components/vendor/VendorDashboard';
 import { CustomerDashboard } from './components/customer/CustomerDashboard';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 
+import { Store } from 'lucide-react';
+import { testFirestoreConnection } from './firebase';
+
 const MainApp: React.FC = () => {
-  const { currentUser, role, isAuthenticated } = useAuth();
+  const { currentUser, role, isAuthenticated, isApprovedVendor } = useAuth();
   const { addToCart } = useCart();
 
   // Navigation & View state
@@ -47,24 +50,32 @@ const MainApp: React.FC = () => {
 
   // Live products & notifications state
   const [marketplaceProducts, setMarketplaceProducts] = useState<Product[]>([]);
-  const [notifications, setNotifications] = useState(db.getNotifications());
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const loadData = () => {
-    // Approved vendor products that are published automatically appear here!
-    const publicProducts = db.getPublicMarketplaceProducts();
-    setMarketplaceProducts(publicProducts);
-
-    if (currentUser) {
-      setNotifications(db.getUserNotifications(currentUser.id, role || undefined));
-    } else {
-      setNotifications(db.getNotifications());
-    }
-  };
-
   useEffect(() => {
-    loadData();
-  }, [currentUser, role]);
+    // 1. Subscribe to Live Firestore Products
+    const unsubProducts = db.subscribeProducts((prods) => {
+      const publicProds = prods.filter(
+        (p) => p.status === 'published' || p.status === 'out_of_stock'
+      );
+      setMarketplaceProducts(publicProds);
+    });
+
+    // 2. Subscribe to Live Firestore Vendors
+    const unsubVendors = db.subscribeVendors(() => {
+      // Refresh filtered public products when vendors update
+      setMarketplaceProducts(db.getPublicMarketplaceProducts());
+    });
+
+    // 3. Test connection
+    testFirestoreConnection().catch(console.warn);
+
+    return () => {
+      unsubProducts();
+      unsubVendors();
+    };
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -77,7 +88,6 @@ const MainApp: React.FC = () => {
   };
 
   const handleAuthSuccess = () => {
-    loadData();
     if (pendingCheckoutResume) {
       setPendingCheckoutResume(false);
       setIsCheckoutOpen(true);
@@ -96,7 +106,6 @@ const MainApp: React.FC = () => {
   };
 
   const handleOrderCreated = (order: Order) => {
-    loadData();
     setActiveOrderForPayment(order);
     showToast(`Order created! Ticket ID: ${order.ticketId}`);
   };
@@ -167,16 +176,43 @@ const MainApp: React.FC = () => {
         )}
 
         {activeView === 'vendor-dashboard' && (
-          <VendorDashboard
-            onOpenProductUpload={() => {}}
-            onSelectProductDetail={(p) => setSelectedProductForDetail(p)}
-          />
+          isApprovedVendor ? (
+            <VendorDashboard
+              onOpenProductUpload={() => {}}
+              onSelectProductDetail={(p) => setSelectedProductForDetail(p)}
+            />
+          ) : (
+            <div className="max-w-xl mx-auto my-12 p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
+                <Store className="w-6 h-6 text-amber-700" />
+              </div>
+              <h3 className="font-bold text-slate-900 text-lg">Vendor Access Restricted</h3>
+              <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
+                Only approved, verified vendors can access merchant selling tools and publish products. If you recently submitted an application, it is currently awaiting administrator review.
+              </p>
+              <div className="flex justify-center gap-2 pt-2">
+                <button
+                  onClick={() => setActiveView('customer-dashboard')}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs"
+                >
+                  View Status in Customer Dashboard
+                </button>
+                <button
+                  onClick={() => setActiveView('home')}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold text-xs rounded-xl"
+                >
+                  Return to Home
+                </button>
+              </div>
+            </div>
+          )
         )}
 
         {activeView === 'customer-dashboard' && (
           <CustomerDashboard
             onOpenRequestModal={() => setIsRequestModalOpen(true)}
             onBrowseMarketplace={() => setActiveView('home')}
+            onNavigateToVendor={() => setActiveView('vendor-dashboard')}
           />
         )}
 
@@ -186,7 +222,13 @@ const MainApp: React.FC = () => {
       {/* Global Footer */}
       <Footer
         onOpenRequestModal={() => setIsRequestModalOpen(true)}
-        onOpenVendorAuth={() => handleOpenAuth('vendor')}
+        onOpenVendorAuth={() => {
+          if (isAuthenticated) {
+            setActiveView('customer-dashboard');
+          } else {
+            handleOpenAuth('customer');
+          }
+        }}
       />
 
       {/* Modals & Drawers */}
@@ -210,7 +252,7 @@ const MainApp: React.FC = () => {
         isOpen={isNotifOpen}
         onClose={() => setIsNotifOpen(false)}
         notifications={notifications}
-        onRefresh={loadData}
+        onRefresh={() => {}}
         onNavigateToItem={(type) => {
           setIsNotifOpen(false);
           if (type === 'order' || type === 'request') {
@@ -239,7 +281,6 @@ const MainApp: React.FC = () => {
         order={activeOrderForPayment}
         onClose={() => setActiveOrderForPayment(null)}
         onPaymentClaimSubmitted={() => {
-          loadData();
           showToast('Payment claim submitted! Awaiting administrator statement check.');
         }}
       />
@@ -248,7 +289,6 @@ const MainApp: React.FC = () => {
         isOpen={isRequestModalOpen}
         onClose={() => setIsRequestModalOpen(false)}
         onRequestCreated={() => {
-          loadData();
           showToast('Sourcing request submitted! Track under Customer Dashboard.');
         }}
         onPromptLogin={() => {

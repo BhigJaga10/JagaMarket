@@ -44,7 +44,7 @@ export const RequestProductModal: React.FC<RequestProductModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -60,7 +60,7 @@ export const RequestProductModal: React.FC<RequestProductModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const newRequest = db.createSourcingRequest({
+      const newRequest = await db.createSourcingRequest({
         customerId: currentUser.id,
         customerName: currentUser.fullName,
         customerEmail: currentUser.email,

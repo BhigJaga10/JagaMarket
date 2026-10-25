@@ -102,7 +102,7 @@ export const VendorProductUploadModal: React.FC<VendorProductUploadModalProps> =
     setVariants(variants.filter((v) => v.id !== id));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -130,7 +130,7 @@ export const VendorProductUploadModal: React.FC<VendorProductUploadModalProps> =
     try {
       let savedProduct: Product;
       if (productToEdit) {
-        savedProduct = db.updateProduct(
+        savedProduct = await db.updateProduct(
           productToEdit.id,
           {
             name,
@@ -152,7 +152,7 @@ export const VendorProductUploadModal: React.FC<VendorProductUploadModalProps> =
           currentUser.id
         );
       } else {
-        savedProduct = db.createProduct(
+        savedProduct = await db.createProduct(
           {
             vendorId: currentVendorProfile?.id || '',
             vendorBusinessName: currentVendorProfile?.businessName || 'Verified Vendor',
@@ -232,6 +232,11 @@ export const VendorProductUploadModal: React.FC<VendorProductUploadModalProps> =
               </span>
             </div>
 
+            {/* Cloud Storage Pending Notice (Rule 6) */}
+            <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] leading-relaxed">
+              <strong>⚠️ Cloud Storage Status:</strong> Direct file uploads from your device camera/gallery are pending Firebase Storage (Blaze plan upgrade). Please enter a public image URL or select from verified marketplace product photos below. <em>Permanent base64 image strings are disabled to protect database limits.</em>
+            </div>
+
             {/* Thumbnail previews */}
             <div className="flex flex-wrap gap-3">
               {images.map((img, idx) => (
@@ -254,13 +259,51 @@ export const VendorProductUploadModal: React.FC<VendorProductUploadModalProps> =
               ))}
             </div>
 
-            {/* Add Image input */}
+            {/* Preset Nigerian Marketplace Photos for convenience */}
+            <div>
+              <p className="text-[11px] font-semibold text-slate-600 mb-1">Quick Verified Photo Presets:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: 'Ankara Wax Fabric', url: 'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?auto=format&fit=crop&w=800&q=80' },
+                  { label: 'Senator Suit', url: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80' },
+                  { label: 'Solar Inverter', url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80' },
+                  { label: 'Oraimo Earbuds', url: 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=800&q=80' },
+                  { label: 'Smart Android TV', url: 'https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?auto=format&fit=crop&w=800&q=80' },
+                  { label: 'Benue Yams', url: 'https://images.unsplash.com/photo-1598170845058-32b9d6a5da37?auto=format&fit=crop&w=800&q=80' },
+                  { label: 'Palm Oil Gallon', url: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=800&q=80' },
+                  { label: 'Redmi Smartphone', url: 'https://images.unsplash.com/photo-1511707171634-5f897ff02560?auto=format&fit=crop&w=800&q=80' }
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      if (!images.includes(preset.url)) {
+                        setImages([...images, preset.url]);
+                      }
+                    }}
+                    className="px-2 py-1 rounded-md bg-white border border-slate-200 hover:border-emerald-500 text-[10px] text-slate-700 transition"
+                  >
+                    + {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Add Image URL input */}
             <div className="flex gap-2 pt-1">
               <input
                 type="url"
-                placeholder="Paste product image URL (Unsplash or direct image URL)..."
+                placeholder="Paste public image URL (e.g. https://...)..."
                 value={newImageUrl}
-                onChange={(e) => setNewImageUrl(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val.startsWith('data:image')) {
+                    setError('Base64 image strings are disabled. Please use direct public image URLs to protect database capacity.');
+                    return;
+                  }
+                  setError(null);
+                  setNewImageUrl(val);
+                }}
                 className="flex-1 text-xs p-2 rounded-xl border border-slate-300 focus:outline-emerald-600"
               />
               <button

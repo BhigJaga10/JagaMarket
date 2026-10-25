@@ -1,0 +1,260 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Pillar 7)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Super Admin: either by bootstrapped verified email or in admins collection
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'sadiqmuhammadibrahim1436@gmail.com' && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'google.com')) ||
+        (request.auth.token.email == 'admin@jaga.ng' && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'google.com')) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 1. Admins Collection
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && (isOwner(adminId) || isAdmin());
+      allow list, write: if isAdmin();
+    }
+
+    // 2. Users Collection (Customer-First Registration & Profile)
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      // On registration, all regular users MUST start strictly as customer. Role cannot be self-escalated.
+      allow create: if isOwner(userId) && isValidId(userId) &&
+        (incoming().role == 'customer' || isAdmin()) &&
+        incoming().userId == userId;
+      // Users can only edit profile contact fields; role changes require admin privilege
+      allow update: if (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'phone', 'address'])) || isAdmin();
+      allow delete: if isAdmin();
+
+      // PII Split Collection: /users/{userId}/private/info
+      match /private/info {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // User's private cart
+      match /cart/{cartItemId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // User's private notifications
+      match /notifications/{notifId} {
+        allow read, update, delete: if isOwner(userId) || isAdmin();
+        allow create: if isSignedIn();
+      }
+    }
+
+    // 2.5 Vendor Applications Collection (Protected KYC & Payout Details)
+    match /vendor_applications/{applicationId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isValidId(applicationId) &&
+        incoming().userId == request.auth.uid &&
+        incoming().status == 'pending';
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          existing().userId == request.auth.uid &&
+          existing().status in ['not_applied', 'needs_changes'] &&
+          incoming().status == 'pending' &&
+          incoming().userId == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'legalName', 'phone', 'businessName', 'businessAddress', 'state', 'lga',
+            'businessDescription', 'category', 'cacNumber', 'tinNumber', 'idType',
+            'idDocumentUrl', 'cacCertificateUrl', 'bankName', 'accountNumber',
+            'accountName', 'status', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isAdmin();
+
+      // Isolated Private subcollection for sensitive documents
+      match /private/{docId} {
+        allow read, write: if isSignedIn() && (
+          (exists(/databases/$(database)/documents/vendor_applications/$(applicationId)) &&
+           get(/databases/$(database)/documents/vendor_applications/$(applicationId)).data.userId == request.auth.uid) ||
+          isAdmin()
+        );
+      }
+    }
+
+    // 3. Vendors Collection (Public Marketplace Profile)
+    match /vendors/{vendorId} {
+      allow get, list: if true; // Publicly visible verified vendors on marketplace
+      // Vendor creation is authorized only for verified admins or approved onboarding
+      allow create: if isSignedIn() && isValidId(vendorId) && (
+        isAdmin() ||
+        (incoming().userId == request.auth.uid && incoming().kycStatus == 'pending')
+      );
+      allow update: if (
+        (isSignedIn() && existing().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'businessAddress', 'phone', 'category'])) ||
+        isAdmin() // Admin can approve/reject/suspend KYC
+      );
+      allow delete: if isAdmin();
+
+      // PII Split Collection: /vendors/{vendorId}/private/kyc (Sensitive CAC, NIN documents)
+      match /private/kyc {
+        allow read, write: if (isSignedIn() && get(/databases/$(database)/documents/vendors/$(vendorId)).data.userId == request.auth.uid) || isAdmin();
+      }
+    }
+
+    // 4. Products Collection
+    match /products/{productId} {
+      // Anyone can browse published products (guests & customers)
+      allow get: if true;
+      allow list: if true;
+
+      // Only approved vendors or platform admins can create products, with mandatory image
+      allow create: if isSignedIn() && isValidId(productId) && incoming().images.size() >= 1 && (
+        isAdmin() ||
+        (
+          exists(/databases/$(database)/documents/vendors/$(incoming().vendorId)) &&
+          get(/databases/$(database)/documents/vendors/$(incoming().vendorId)).data.userId == request.auth.uid &&
+          get(/databases/$(database)/documents/vendors/$(incoming().vendorId)).data.kycStatus == 'approved'
+        )
+      );
+
+      // Vendor owner can update stock, price, status, or Admin
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          exists(/databases/$(database)/documents/vendors/$(existing().vendorId)) &&
+          get(/databases/$(database)/documents/vendors/$(existing().vendorId)).data.userId == request.auth.uid
+        )
+      );
+
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        (
+          exists(/databases/$(database)/documents/vendors/$(existing().vendorId)) &&
+          get(/databases/$(database)/documents/vendors/$(existing().vendorId)).data.userId == request.auth.uid
+        )
+      );
+    }
+
+    // 5. Orders Collection
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && (
+        existing().customerId == request.auth.uid ||
+        isAdmin() ||
+        ('vendorUserIds' in existing() && request.auth.uid in existing().vendorUserIds)
+      );
+
+      allow list: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.customerId == request.auth.uid ||
+        ('vendorUserIds' in resource.data && request.auth.uid in resource.data.vendorUserIds)
+      );
+
+      allow create: if isSignedIn() && isValidId(orderId) &&
+        incoming().customerId == request.auth.uid &&
+        incoming().paymentStatus in ['awaiting_payment', 'payment_claimed'];
+
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (existing().customerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['paymentClaim', 'paymentStatus', 'cancellationReason', 'orderStatus']))
+      );
+
+      allow delete: if isAdmin();
+
+      // Isolated Private Payment Evidence: /orders/{orderId}/private/payment
+      match /private/payment {
+        allow read, write: if isSignedIn() && (
+          (exists(/databases/$(database)/documents/orders/$(orderId)) && get(/databases/$(database)/documents/orders/$(orderId)).data.customerId == request.auth.uid) ||
+          isAdmin()
+        );
+      }
+    }
+
+    // 6. Vendor Suborders Collection
+    match /suborders/{subOrderId} {
+      allow get: if isSignedIn() && (
+        isAdmin() ||
+        existing().vendorUserId == request.auth.uid ||
+        ('customerId' in existing() && existing().customerId == request.auth.uid)
+      );
+
+      allow list: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.vendorUserId == request.auth.uid ||
+        ('customerId' in resource.data && resource.data.customerId == request.auth.uid)
+      );
+
+      allow create: if isSignedIn() || isAdmin();
+
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        existing().vendorUserId == request.auth.uid
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // 7. Sourcing Requests Collection
+    match /sourcing_requests/{requestId} {
+      allow get: if isSignedIn() && (
+        existing().customerId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow list: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.customerId == request.auth.uid
+      );
+
+      allow create: if isSignedIn() && isValidId(requestId) &&
+        incoming().customerId == request.auth.uid;
+
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (existing().customerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['customerDecision', 'status']))
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // 8. Global Settings Collection
+    match /settings/{settingId} {
+      allow get, list: if true; // Public bank instructions for customers
+      allow write: if isAdmin();
+    }
+
+    // 9. Audit Logs
+    match /audit_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 10. Test Connection document
+    match /test/connection {
+      allow get: if true;
+    }
+  }
+}

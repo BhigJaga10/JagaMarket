@@ -50,7 +50,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const deliveryFee = matchedZone ? matchedZone.fee : 4000;
   const grandTotal = subtotal + deliveryFee;
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
+  const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -74,7 +74,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       // Server-side order creation:
       // Validates stock, recalculates prices, generates unique Ticket ID JAG-2026-XXXXXX,
       // and splits into vendor suborders!
-      const newOrder = db.createOrder({
+      const newOrder = await db.createOrder({
         customer: currentUser,
         deliveryAddress: {
           fullName,

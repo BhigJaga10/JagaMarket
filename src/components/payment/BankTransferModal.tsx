@@ -49,7 +49,7 @@ export const BankTransferModal: React.FC<BankTransferModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const handleSubmitClaim = (e: React.FormEvent) => {
+  const handleSubmitClaim = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -60,7 +60,7 @@ export const BankTransferModal: React.FC<BankTransferModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const updatedOrder = db.submitPaymentClaim(
+      const updatedOrder = await db.submitPaymentClaim(
         order.ticketId,
         {
           bankPaidFrom,

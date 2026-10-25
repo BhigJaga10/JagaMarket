@@ -1,0 +1,215 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role assignment and basic public identity",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["customer", "vendor", "admin"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "fullName", "email", "role"]
+    },
+    "UserPrivateData": {
+      "title": "UserPrivateData",
+      "description": "Private address and delivery details isolated from public profile",
+      "type": "object",
+      "properties": {
+        "street": { "type": "string", "maxLength": 200 },
+        "city": { "type": "string", "maxLength": 100 },
+        "state": { "type": "string", "maxLength": 50 },
+        "lga": { "type": "string", "maxLength": 50 }
+      }
+    },
+    "VendorProfile": {
+      "title": "VendorProfile",
+      "description": "Public merchant profile displayed in marketplace",
+      "type": "object",
+      "properties": {
+        "vendorId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "businessName": { "type": "string", "maxLength": 100 },
+        "ownerName": { "type": "string", "maxLength": 100 },
+        "businessAddress": { "type": "string", "maxLength": 200 },
+        "state": { "type": "string", "maxLength": 50 },
+        "category": { "type": "string", "maxLength": 80 },
+        "kycStatus": { "type": "string", "enum": ["pending", "approved", "rejected", "suspended"] },
+        "rating": { "type": "number" },
+        "totalSales": { "type": "number" }
+      },
+      "required": ["vendorId", "userId", "businessName", "ownerName", "kycStatus"]
+    },
+    "VendorPrivateKYC": {
+      "title": "VendorPrivateKYC",
+      "description": "Sensitive CAC, TIN, and identity verification credentials",
+      "type": "object",
+      "properties": {
+        "cacNumber": { "type": "string", "maxLength": 50 },
+        "tinNumber": { "type": "string", "maxLength": 50 },
+        "idType": { "type": "string", "maxLength": 50 },
+        "cacDocUrl": { "type": "string", "maxLength": 500 },
+        "idDocUrl": { "type": "string", "maxLength": 500 },
+        "rejectionReason": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Publicly discoverable product in the marketplace",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "maxLength": 128 },
+        "vendorId": { "type": "string", "maxLength": 128 },
+        "vendorBusinessName": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 80 },
+        "subcategory": { "type": "string", "maxLength": 80 },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "sku": { "type": "string", "maxLength": 50 },
+        "brand": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["published", "draft", "out_of_stock", "rejected"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["productId", "vendorId", "name", "price", "stock", "status"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order with ticket ID and fulfillment tracking",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "maxLength": 128 },
+        "ticketId": { "type": "string", "maxLength": 50 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "total": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["awaiting_payment", "payment_claimed", "under_review", "confirmed", "rejected", "refund_pending", "refunded"] },
+        "orderStatus": { "type": "string", "enum": ["pending", "processing", "ready_for_dispatch", "in_transit", "delivered", "cancelled"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["orderId", "ticketId", "customerId", "total", "paymentStatus", "orderStatus"]
+    },
+    "PaymentClaimPrivate": {
+      "title": "PaymentClaimPrivate",
+      "description": "Isolated bank transfer payment claim with reference and receipt",
+      "type": "object",
+      "properties": {
+        "bankPaidFrom": { "type": "string", "maxLength": 80 },
+        "accountSenderName": { "type": "string", "maxLength": 100 },
+        "transactionReference": { "type": "string", "maxLength": 100 },
+        "claimedAmount": { "type": "number" },
+        "receiptUrl": { "type": "string", "maxLength": 500 },
+        "verifiedByAdmin": { "type": "string", "maxLength": 100 },
+        "adminNote": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["bankPaidFrom", "accountSenderName", "transactionReference", "claimedAmount"]
+    },
+    "ProductSourcingRequest": {
+      "title": "ProductSourcingRequest",
+      "description": "Customer request for unavailable or rare items",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string", "maxLength": 50 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["submitted", "under_review", "quotation_ready", "accepted", "closed"] }
+      },
+      "required": ["requestId", "customerId", "productName", "status"]
+    },
+    "MarketplaceBankSettings": {
+      "title": "MarketplaceBankSettings",
+      "description": "Official admin-managed bank transfer escrow parameters",
+      "type": "object",
+      "properties": {
+        "bankName": { "type": "string", "maxLength": 80 },
+        "accountName": { "type": "string", "maxLength": 100 },
+        "accountNumber": { "type": "string", "maxLength": 20 },
+        "instructions": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["bankName", "accountName", "accountNumber"]
+    },
+    "VendorApplication": {
+      "title": "VendorApplication",
+      "description": "Customer application to become a verified vendor with KYC and payout details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "legalName": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "businessName": { "type": "string", "maxLength": 100 },
+        "businessAddress": { "type": "string", "maxLength": 250 },
+        "state": { "type": "string", "maxLength": 50 },
+        "lga": { "type": "string", "maxLength": 50 },
+        "businessDescription": { "type": "string", "maxLength": 1500 },
+        "category": { "type": "string", "maxLength": 80 },
+        "cacNumber": { "type": "string", "maxLength": 50 },
+        "tinNumber": { "type": "string", "maxLength": 50 },
+        "idType": { "type": "string", "maxLength": 50 },
+        "idDocumentUrl": { "type": "string", "maxLength": 500 },
+        "cacCertificateUrl": { "type": "string", "maxLength": 500 },
+        "bankName": { "type": "string", "maxLength": 100 },
+        "accountNumber": { "type": "string", "maxLength": 20 },
+        "accountName": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["not_applied", "pending", "approved", "rejected", "needs_changes", "suspended"] },
+        "adminNotes": { "type": "string", "maxLength": 1000 },
+        "reviewedByAdminUid": { "type": "string", "maxLength": 128 },
+        "reviewedByAdminEmail": { "type": "string", "maxLength": 120 },
+        "reviewedAt": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "legalName", "phone", "businessName", "businessAddress", "state", "category", "bankName", "accountNumber", "accountName", "status", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User account and role document"
+    },
+    "/users/{userId}/private/info": {
+      "schema": "UserPrivateData",
+      "description": "Customer private delivery addresses and PII"
+    },
+    "/vendor_applications/{applicationId}": {
+      "schema": "VendorApplication",
+      "description": "Protected vendor applications submitted by customers and reviewed by admins"
+    },
+    "/vendors/{vendorId}": {
+      "schema": "VendorProfile",
+      "description": "Public verified or pending merchant details"
+    },
+    "/vendors/{vendorId}/private/kyc": {
+      "schema": "VendorPrivateKYC",
+      "description": "Private vendor KYC, CAC and identity verification documents"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Marketplace product catalogue items uploaded by approved vendors"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Order records with unique ticket IDs"
+    },
+    "/orders/{orderId}/private/payment": {
+      "schema": "PaymentClaimPrivate",
+      "description": "Bank transfer reference, claim details, and admin verification logs"
+    },
+    "/sourcing_requests/{requestId}": {
+      "schema": "ProductSourcingRequest",
+      "description": "Customer custom sourcing requests and admin quotations"
+    },
+    "/settings/bank": {
+      "schema": "MarketplaceBankSettings",
+      "description": "Global bank transfer account configurations"
+    }
+  }
+}
