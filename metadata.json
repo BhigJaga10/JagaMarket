@@ -1,0 +1,6 @@
+{
+  "name": "JAGA — Nigerian Online Marketplace",
+  "description": "Multi-vendor Nigerian e-commerce marketplace connecting customers, approved vendors, and platform administrators with bank transfer verification, order tracking, and sourcing requests.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

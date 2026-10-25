@@ -1,0 +1,643 @@
+# MASTER PROJECT PROMPT: BUILD JAGA — A NIGERIAN ONLINE MARKETPLACE
+
+Build a complete, modern, responsive e-commerce marketplace called **JAGA**. JAGA connects customers with multiple vendors across Nigeria. Vendors can register, submit verification documents, upload products with pictures, manage stock and orders, and receive payment-confirmation notifications. Customers can browse products, search for items, place orders, pay by bank transfer, track deliveries, and request products that are not available. Administrators manage the entire platform.
+
+The website should be inspired by the convenience and product-discovery experience of Temu, but use original JAGA branding, layout, text, and visual identity.
+
+Do not build only a landing page or a static demo. Build a functional application with connected pages, persistent data, authentication, role-based dashboards, database relationships, secure permissions, and working marketplace workflows.
+
+## 1. Brand and design
+
+- Brand name: **JAGA**
+- Market: Nigeria
+- Default currency: Nigerian naira (₦ / NGN)
+- Primary audience: Nigerian customers, vendors, and administrators.
+- Design style: modern, clean, professional, mobile-first, easy to navigate.
+- Use a clear search bar, attractive product cards, category navigation, product photos, readable prices, visible stock status, and clear order buttons.
+- Create an original JAGA logo and consistent brand colors.
+- Make the site work on mobile phones, tablets, laptops, and desktops.
+- Use realistic sample products only for development or demonstration. Clearly label demo data and never present demo payments or orders as real.
+
+## 2. Separate login and sign-up for each user role
+
+Create a dedicated authentication experience for all three roles:
+
+1. Customer login and sign-up.
+2. Vendor login and sign-up.
+3. Admin login.
+
+Create clear buttons or links for Customer, Vendor, and Admin access on the authentication page.
+
+### Customer registration
+Collect:
+- Full name
+- Email address
+- Phone number
+- Password
+- Optional delivery address
+
+Allow customers to verify their email or phone where a supported service is configured, log in, log out, reset forgotten passwords, and manage their profiles.
+
+### Vendor registration
+Collect:
+- Business or shop name
+- Owner's full name
+- Email address
+- Phone number
+- Business address and operating location
+- Password
+- Business category
+- Required KYC documents
+
+After registration, send the vendor to a verification-pending dashboard. Vendors must not publish products or receive live orders until the administrator approves their account.
+
+### Admin login
+- Administrators must use a secure, separate admin login page.
+- Never allow someone to become an administrator simply by selecting “Admin” during sign-up.
+- Admin accounts must be created through a secure server-side process or trusted setup procedure.
+- Enforce role-based permissions on the server and database, not just by hiding buttons in the interface.
+
+## 3. Homepage: display products vendors upload
+
+The JAGA homepage must be a live marketplace, not just a welcome screen.
+
+**Every approved vendor's published and available products should automatically appear on the homepage.**
+
+When a vendor uploads a product, adds its information and pictures, and publishes it after approval, that product should appear in the relevant homepage sections without an administrator manually adding it.
+
+Create these homepage sections:
+- JAGA logo and navigation.
+- Large product search bar.
+- Product categories.
+- Featured products.
+- Newly added products.
+- Popular products, based on genuine order data when available.
+- Products by category.
+- Deals and discounts, when configured.
+- Nearby or locally available products, when vendor location and delivery coverage are supported.
+- “Request a product” button for items customers cannot find.
+- Vendor registration call-to-action.
+- Customer account and cart icons.
+- Footer containing contact information, help, policies, and social links.
+
+Only show published products from approved vendors. Automatically hide unpublished, rejected, suspended, or unavailable products. Clearly show out-of-stock products and disable their purchase buttons until stock is available.
+
+Include pagination or a “Load more” feature so the homepage remains fast as the catalogue grows.
+
+## 4. Vendor product upload with mandatory pictures
+
+Create a complete vendor product-upload form.
+
+**A vendor must upload at least one product picture before publishing a product.** Make the image upload field obvious and mandatory.
+
+Each product form must include:
+- Product name.
+- Detailed product description.
+- Main product image.
+- Additional product pictures.
+- Category and subcategory.
+- Selling price in NGN.
+- Optional previous price for a genuine discount.
+- Available quantity.
+- SKU or product code.
+- Brand or manufacturer, if applicable.
+- Condition: new or used, where relevant.
+- Product weight and dimensions, where needed for delivery.
+- Color variants.
+- Size variants.
+- Model or other options, where applicable.
+- Stock quantity for each variant.
+- Estimated preparation time.
+- Delivery locations or coverage.
+- Product status: draft, pending review, published, rejected, or out of stock.
+
+### Image upload functionality
+- Allow vendors to select images from their phone or computer.
+- Show image previews before submission.
+- Allow multiple images and a main cover image.
+- Allow vendors to remove or replace pictures before publishing.
+- Validate file types and sizes.
+- Upload images to persistent storage; do not rely on temporary browser previews.
+- Store image URLs and product details in the database.
+- Display the main image on the homepage and all images on the product detail page.
+- Show a helpful error if an image upload fails.
+- Require at least one successfully uploaded picture before publishing.
+
+Vendors must be able to edit their product details, update images, change prices, adjust stock, pause listings, and unpublish products they own.
+
+Include an admin product-review process to approve, reject, or request changes to listings before publication.
+
+## 5. Product browsing and search
+
+Customers should be able to browse products without logging in.
+
+Create:
+- Search by product name, description, brand, category, and SKU.
+- Category and subcategory filters.
+- Minimum and maximum price filters.
+- Availability filters.
+- Color and size filters when applicable.
+- Sort by newest, price low-to-high, price high-to-low, and popularity where reliable data exists.
+- Product detail pages with pictures, description, price, stock, variant choices, vendor information, delivery estimate, and reviews when available.
+
+Show the vendor's public shop name and relevant product information. Do not reveal private KYC documents or sensitive vendor data.
+
+## 6. Customer login required to place an order
+
+Visitors can view products, search, select variants, and add items to a cart. However, **a customer must sign in or create a customer account before completing checkout and placing an order**.
+
+If a visitor clicks “Place order” while logged out:
+1. Ask them to sign in or create an account.
+2. Preserve their cart.
+3. Return them to checkout after successful authentication.
+
+The checkout process should:
+- Confirm product variants and quantities.
+- Validate current stock.
+- Collect or select the delivery address.
+- Calculate product subtotals.
+- Calculate configured delivery fees.
+- Show the complete total in NGN.
+- Display the order's unique ticket ID.
+- Explain the available payment instructions.
+- Require the customer to confirm the order before submission.
+
+Never trust totals or stock values supplied only by the browser. Recalculate prices and validate stock on the server.
+
+## 7. Unique order ticket ID
+
+Generate a unique order ticket ID for every order on the server, such as:
+
+`JAG-2026-000123`
+
+Requirements:
+- Every order must have its own unique ticket ID.
+- The ticket ID must be generated automatically and protected against duplicates.
+- Display it in the customer's order confirmation, dashboard, payment instructions, and notifications.
+- Allow customers, vendors, and administrators to search for orders by ticket ID, subject to their permissions.
+- Include the ticket ID in payment instructions and bank-transfer narration.
+- If one order contains products from several vendors, create a parent order and separate vendor-specific order records. Keep a shared customer order reference and distinct vendor suborder references where necessary.
+
+## 8. Bank transfer payment and admin confirmation
+
+Implement a manual bank-transfer workflow for Nigerian payments.
+
+### Admin payment settings
+Allow administrators to configure:
+- Bank name.
+- Account name.
+- Account number.
+- Payment instructions.
+- Payment verification contact.
+- Optional transfer deadline.
+
+Do not invent or hardcode real bank details. Use clearly marked placeholders until an administrator enters verified account information.
+
+### Customer payment process
+After placing an order:
+- Show the order ticket ID.
+- Show the configured bank-transfer instructions.
+- Show the exact total amount due.
+- Tell the customer to include the order ticket ID in the transfer narration.
+- Example narration: `JAG-2026-000123`
+- Allow the customer to submit a payment claim with transfer reference, transfer date, amount, and optional proof of payment.
+- Clearly state that uploading proof does not mean the payment has been confirmed.
+
+### Admin payment verification
+The admin dashboard must include a payment-verification queue showing:
+- Order ticket ID.
+- Customer.
+- Amount expected.
+- Claimed amount.
+- Transfer reference.
+- Submitted payment evidence, if any.
+- Date submitted.
+- Verification status.
+
+The administrator must independently check the actual bank transaction before marking a payment as confirmed.
+
+When the admin confirms payment:
+- Record the verifier and timestamp.
+- Update the payment status.
+- Notify the customer.
+- Notify each affected vendor that the relevant order is paid and ready for processing.
+- Update the order timeline.
+- Add the action to the audit log.
+
+Payment statuses should include:
+- Awaiting payment.
+- Payment claimed.
+- Under review.
+- Confirmed.
+- Rejected.
+- Refund pending.
+- Refunded, only after the refund is actually completed and recorded.
+
+Do not automatically confirm payments because a customer uploads a receipt. Do not claim to have bank integration unless a real, authorized integration is configured.
+
+## 9. Vendor dashboard
+
+Create a dedicated vendor dashboard with the following sections:
+
+### Overview
+- Verification status.
+- Published products.
+- Pending product reviews.
+- Available stock.
+- New orders.
+- Orders awaiting fulfillment.
+- Paid orders.
+- Cancelled orders.
+- Sales summaries based on recorded transactions.
+
+### My products
+- Add product.
+- Upload product pictures.
+- Edit descriptions, prices, and variants.
+- Manage stock.
+- Publish or unpublish products.
+- View rejection reasons.
+- Resubmit edited products for review.
+
+### My orders
+Vendors must see only the orders or suborders containing their own products.
+
+Show:
+- Ticket ID and relevant suborder ID.
+- Products and variants purchased.
+- Quantities.
+- Customer delivery details required for fulfillment.
+- Payment status.
+- Order status.
+- Admin-set delivery date.
+- Relevant delivery instructions.
+
+Vendors must never be able to view another vendor's private orders, customer data unrelated to their fulfillment, payment evidence belonging to other orders, or administrative records.
+
+### Vendor order actions
+Allow vendors to:
+- Accept or reject eligible orders with a reason.
+- Prepare orders.
+- Mark an order ready for dispatch.
+- Update fulfillment status.
+- Request cancellation where permitted.
+- Contact the admin about an order.
+
+Vendors cannot mark a payment as confirmed or change the customer's payment records.
+
+### Vendor notifications
+Notify vendors when:
+- Their account is approved or rejected.
+- A product is approved, rejected, or needs changes.
+- A customer places an order containing their product.
+- The admin confirms the order payment.
+- The admin sets or changes a delivery date.
+- An order is cancelled or requires action.
+
+## 10. Admin dashboard and controls
+
+Create a secure admin dashboard with these sections:
+
+### User and vendor management
+- View customers and vendors.
+- Review vendor KYC applications.
+- Approve, reject, suspend, or reactivate vendors.
+- Record reasons for decisions.
+- View vendor status and account activity.
+- Manage admin-created roles and permissions securely.
+
+### Product management
+- Review new product submissions.
+- View product pictures and descriptions.
+- Approve, reject, or request changes.
+- Remove prohibited or misleading listings.
+- Manage categories and featured products.
+- View inventory and reported listings.
+
+### Order management
+- View all orders and vendor suborders.
+- Search by ticket ID, customer, vendor, date, or status.
+- Review order details.
+- Update allowed order statuses.
+- Cancel eligible orders with a reason.
+- Set and change delivery dates.
+- Add internal notes.
+- View a timeline of order events.
+
+### Payment management
+- Review payment claims.
+- Confirm or reject payment claims after verification.
+- Configure bank-transfer instructions.
+- Track outstanding payments.
+- Manage refund requests and record completed refunds.
+- Export permitted payment and order reports.
+
+### Delivery management
+- Configure delivery zones and charges.
+- Set delivery dates for orders.
+- Assign delivery partners or tracking references if supported.
+- Update dispatch and delivery statuses.
+- Notify customers and vendors of changes.
+
+### Customer product requests
+- View product sourcing requests.
+- Assign requests to an admin.
+- Send quotations.
+- Record sourcing costs and delivery estimates.
+- Convert an approved quotation into an order.
+
+### Reporting
+- Order volume.
+- Recorded sales.
+- Pending payments.
+- Confirmed payments.
+- Cancelled orders.
+- Top-selling products based on actual order data.
+- Vendor activity.
+- Product stock alerts.
+
+Provide date filters and export functionality where appropriate. Do not misrepresent pending payments as revenue.
+
+## 11. Order cancellation rules
+
+Customers, vendors, and administrators need appropriate cancellation functionality.
+
+### Customers
+Customers can request cancellation of eligible orders before fulfillment or dispatch, subject to configured rules.
+
+### Vendors
+Vendors can request cancellation of their own vendor suborders if stock is unavailable or fulfillment is impossible. They must supply a reason.
+
+### Administrators
+Administrators can cancel eligible orders or vendor suborders and record a reason.
+
+Rules:
+- Check the current order status before allowing cancellation.
+- Prevent unauthorized users from cancelling other people's orders.
+- Notify all affected parties.
+- Update inventory consistently if cancelled items are returned to stock.
+- Keep an audit trail.
+- If payment was already confirmed, create a refund workflow where applicable.
+- Never mark a refund complete until it has actually been processed and recorded.
+- If only one vendor suborder is cancelled, do not incorrectly cancel unrelated vendor suborders.
+
+## 12. Request a product that is not available
+
+Add a visible “Request a Product” feature to the homepage and customer dashboard.
+
+Customers can submit:
+- Product name.
+- Description.
+- Reference image, if available.
+- Preferred brand, model, color, or size.
+- Expected budget.
+- Quantity.
+- Delivery location.
+- Additional notes.
+
+Generate a unique request ID such as `JAG-REQ-2026-000045`.
+
+Request statuses:
+- Submitted.
+- Under review.
+- Sourcing.
+- Quotation ready.
+- Awaiting customer approval.
+- Accepted.
+- Unable to source.
+- Converted to order.
+- Closed.
+
+The admin can review requests, contact vendors or suppliers, add a quotation, and notify the customer. The customer must approve the quoted price and terms before an order is created. Do not create a paid order automatically just because a request was submitted.
+
+## 13. Delivery and tracking
+
+Build a delivery workflow suitable for a Nigerian marketplace.
+
+- Admin-configured delivery zones and fees.
+- Customer delivery address and contact number.
+- Admin-controlled estimated or scheduled delivery date.
+- Order preparation, dispatch, in-transit, delivered, and delivery-issue statuses where supported.
+- Optional tracking number or delivery partner.
+- Customer order timeline.
+- Notifications when delivery dates or statuses change.
+- Clear communication when a delivery estimate has not yet been confirmed.
+
+Do not display invented tracking events or claim integration with a delivery company unless it is actually configured.
+
+## 14. Customer dashboard
+
+Create a customer dashboard with:
+- Profile and saved addresses.
+- Current cart.
+- Order history.
+- Order details and ticket IDs.
+- Payment status and transfer instructions.
+- Delivery date and order timeline.
+- Cancellation requests where eligible.
+- Product sourcing requests and quotations.
+- Wishlist.
+- Product reviews after a completed purchase, if enabled.
+- Notifications.
+- Help and support.
+
+Allow customers to browse products without an account, but require authentication before placing an order, submitting account-specific requests, or accessing private order information.
+
+## 15. Shopping cart and inventory
+
+- Support adding, removing, and updating quantities in the cart.
+- Store the selected color, size, model, or other variant.
+- Recheck price and stock at checkout.
+- Prevent purchases exceeding available stock.
+- Reduce or reserve stock according to a consistent order and payment policy.
+- Release reserved stock when an eligible order expires or is cancelled.
+- Handle simultaneous purchases safely to avoid selling the same stock twice.
+- Show clear low-stock and out-of-stock messages.
+- Notify vendors when stock becomes low.
+- Preserve the cart for logged-out customers when feasible, and merge it safely after login.
+
+## 16. Notifications and communication
+
+Build an in-app notification system for customers, vendors, and administrators.
+
+Notifications should cover:
+- Registration and verification.
+- KYC decisions.
+- Product review decisions.
+- New orders.
+- Payment claims.
+- Payment confirmation or rejection.
+- Cancellation requests and decisions.
+- Delivery-date changes.
+- Order status changes.
+- Product sourcing quotations.
+- Support messages.
+
+Allow users to mark notifications as read.
+
+Email, SMS, or WhatsApp notifications may be added through supported providers when the administrator configures the relevant API credentials. Do not pretend messages were sent when a provider is not configured or a delivery attempt fails.
+
+## 17. Product reviews and customer trust
+
+Add optional product reviews and ratings.
+
+- Only verified purchasers who meet the configured order-completion requirements can review a product.
+- Prevent duplicate reviews where appropriate.
+- Let administrators moderate abusive, fraudulent, or irrelevant reviews.
+- Display genuine ratings and review counts.
+- Do not fabricate customer reviews, sales figures, popularity rankings, or testimonials.
+
+Show clear vendor information and marketplace policies. Include a way to report a product or contact support.
+
+## 18. Security, privacy, and permissions
+
+Use the existing supported Lovable backend setup, such as Lovable Cloud or Supabase if configured. Do not assume that a particular database or storage provider is installed.
+
+Implement:
+- Secure authentication and password handling.
+- Server-side role checks.
+- Row-level security or equivalent database authorization.
+- Private storage for KYC documents and payment evidence.
+- Restricted access to personal information.
+- Public access only to intended public product information and product pictures.
+- Server-side validation of prices, order totals, stock, ticket IDs, and role permissions.
+- Input validation and safe file-upload rules.
+- Protection against duplicate orders and payment-confirmation actions.
+- Audit logs for important administrative and financial actions.
+- Clear loading, success, empty, and error states.
+
+Never place secret API keys or service-role credentials in frontend code. Do not store raw passwords or expose private KYC documents publicly. Use real backend authorization, not just frontend route guards.
+
+## 19. Database structure
+
+Design appropriate related tables or collections for:
+- User profiles and roles.
+- Vendor profiles.
+- KYC applications and document references.
+- Categories.
+- Products.
+- Product images.
+- Product variants and variant inventory.
+- Shopping carts and cart items.
+- Customer orders.
+- Vendor suborders.
+- Order items.
+- Payments and payment claims.
+- Refund records.
+- Delivery information.
+- Product sourcing requests and quotations.
+- Notifications.
+- Reviews.
+- Support requests.
+- Admin audit logs.
+- Marketplace settings.
+
+Use proper relationships, timestamps, status fields, unique constraints, and access policies. Store uploaded files in persistent storage and save their references in the database.
+
+## 20. Required pages
+
+Build these pages and connect them to the appropriate workflows:
+
+**Public pages**
+- Homepage.
+- Browse all products.
+- Category pages.
+- Product details.
+- Vendor public shop page.
+- Search results.
+- About JAGA.
+- Contact and support.
+- Help and FAQs.
+- Terms and conditions.
+- Privacy policy.
+- Delivery, cancellation, and refund policies.
+
+**Authentication pages**
+- Customer sign-up and login.
+- Vendor sign-up and login.
+- Admin login.
+- Forgot-password and password-reset pages.
+
+**Customer pages**
+- Customer dashboard.
+- Cart.
+- Checkout.
+- Order confirmation.
+- My orders.
+- Payment instructions.
+- Order tracking.
+- Wishlist.
+- Product requests.
+- Notifications.
+- Profile and addresses.
+
+**Vendor pages**
+- Vendor dashboard.
+- KYC application and verification status.
+- Product upload and editing.
+- My products and inventory.
+- My orders.
+- Order details.
+- Notifications.
+- Vendor profile and settings.
+
+**Admin pages**
+- Admin dashboard.
+- Vendor verification.
+- Product approvals.
+- User management.
+- Order management.
+- Payment verification.
+- Delivery management.
+- Product sourcing requests.
+- Refund management.
+- Categories and marketplace settings.
+- Reports and audit logs.
+
+## 21. Development and acceptance tests
+
+Test the complete application, not just its appearance.
+
+Verify that:
+
+1. A customer can register, log in, browse products, and place an order.
+2. A logged-out visitor who attempts checkout is redirected to login or sign-up, and their cart is preserved.
+3. A vendor can register and submit KYC documents.
+4. An unapproved vendor cannot publish products.
+5. A vendor must upload at least one product image before publishing.
+6. An approved vendor's published products appear automatically on the homepage.
+7. Product pictures remain available after refreshing or reopening the website.
+8. Product variants and stock quantities work correctly.
+9. Every order receives a unique ticket ID.
+10. Bank-transfer instructions display the correct administrator-configured account information.
+11. A payment claim does not automatically mark an order as paid.
+12. Only an authorized administrator can confirm a payment.
+13. Payment confirmation alerts the customer and affected vendor accounts.
+14. Vendors see only their own products and related orders.
+15. Administrators can set delivery dates and notify affected users.
+16. Cancellation permissions and stock restoration behave correctly.
+17. Product sourcing requests can receive quotations and be approved by customers.
+18. Unauthenticated users cannot view private orders, KYC files, or payment evidence.
+19. Unauthorized users cannot change roles, prices, totals, payment statuses, or another vendor's inventory.
+20. The application works on mobile and desktop.
+21. Empty states, errors, loading states, and success messages are clear.
+
+## 22. Build instructions
+
+Build JAGA in logical phases, but keep the data model and workflows consistent across the application.
+
+Recommended order:
+1. Project foundation, database, authentication, and role-based permissions.
+2. Vendor registration, KYC, and admin verification.
+3. Product upload with persistent image storage.
+4. Homepage, search, categories, and product details.
+5. Cart, checkout, ticket IDs, and order records.
+6. Bank-transfer instructions and admin payment verification.
+7. Vendor and customer dashboards.
+8. Order cancellation, delivery scheduling, and notifications.
+9. Product sourcing requests, quotations, and reviews.
+10. Security testing, mobile responsiveness, and end-to-end workflow testing.
+
+Start by inspecting the available Lovable project environment and choosing the supported backend and storage configuration. Then implement the working application. Do not replace functional requirements with decorative buttons, fake data, or nonfunctional placeholders. If an external integration requires credentials, create the configuration interface and clearly identify what must be connected before it can work.
+
+**Final objective:** Deliver a working JAGA marketplace where vendors can register, upload product details and pictures, and manage their own products; customers can discover those products on the homepage and place orders after logging in; and the admin can manage verification, payment confirmation, delivery dates, cancellations, product requests, and the overall marketplace.
